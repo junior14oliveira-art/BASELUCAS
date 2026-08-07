@@ -250,7 +250,7 @@ async def get_web_ui():
         <button class="btn-add-order" onclick="openOrderModal('NEW')">
           <span class="material-icons" style="font-size:18px">add</span> Add order
         </button>
-        <button class="quick-access-btn" style="background:#FFF;">
+        <button class="quick-access-btn" style="background:#FFF;" onclick="filterByChannel('All')" title="Mostrar pedidos de todos os canais">
           <span class="material-icons" style="font-size:18px">inbox</span> All
         </button>
       </div>
@@ -396,7 +396,7 @@ async def get_web_ui():
             <div class="card card-glow">
               <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
                 <h3 style="font-size:1.05rem; font-weight:700; color:#fff;" id="orders-title">Pedidos Gravados no Banco ({len(orders_list)})</h3>
-                <button class="btn btn-primary">+ Criar Pedido Local</button>
+                <button class="btn btn-primary" onclick="openOrderModal('NEW')">+ Criar Pedido Local</button>
               </div>
               <table>
                 <thead>
@@ -539,6 +539,32 @@ async def get_web_ui():
 
     let activeStatusFilter = 'Todos os pedidos';
     let globalSearchTerm = '';
+
+    // Feedback sonoro das ações. Gerado via Web Audio API para não depender
+    // de arquivos de áudio. Todo o corpo é protegido: som é acessório e nunca
+    // pode interromper a ação que o chamou.
+    function playBeepSound(type) {{
+      try {{
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return;
+        if (!window.__audioCtx) window.__audioCtx = new Ctx();
+        const ctx = window.__audioCtx;
+        if (ctx.state === 'suspended') ctx.resume();
+
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.type = 'sine';
+        osc.frequency.value = (type === 'error') ? 220 : 880;
+        gain.gain.setValueAtTime(0.07, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.18);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.18);
+      }} catch (e) {{
+        /* navegador sem suporte ou áudio bloqueado — ignorar */
+      }}
+    }}
 
     // Busca global — casa o termo contra os campos textuais do registro.
     function matchesSearch(fields) {{
