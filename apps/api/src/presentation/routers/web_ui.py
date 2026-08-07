@@ -2,7 +2,9 @@ from fastapi import APIRouter
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select, func
 from src.infrastructure.database import async_session, RealOrderStatusDB, RealOrderDB, RealProductDB
+from src.config import settings
 import json
+import os
 
 router = APIRouter(tags=["Frontend Web UI"])
 
@@ -42,30 +44,41 @@ async def get_web_ui():
                 "status_id": o.status_id,
                 "status": o.status_name,
                 "channel": o.channel_name,
-                "date": o.created_at.strftime("%d/%m/%Y %H:%M") if o.created_at else "07/08/2026 10:00"
+                "date": o.created_at.strftime("%d/%m/%Y %H:%M") if o.created_at else ""
             })
 
         # 3. Fetch Real Products from Database
         prod_res = await session.execute(select(RealProductDB).limit(200))
         db_prods = prod_res.scalars().all()
         prods_list = []
-        for idx, p in enumerate(db_prods):
-            num_seed = abs(hash(str(p.id)))
-            prod_price = float(p.price) if (p.price and p.price > 0) else round(149.90 + (num_seed % 1850), 2)
-            prod_stock = int(p.stock) if (p.stock and p.stock > 0) else (num_seed % 45 + 2)
+        for p in db_prods:
+            # Valores exibidos exatamente como estão no banco. Preço ou estoque
+            # zerado significa que o BaseLinker não trouxe o dado — mostrar 0 é
+            # a informação correta; inventar um número não é.
             prods_list.append({
                 "id": str(p.id),
-                "sku": p.sku if p.sku else f"SKU-{idx+1:03d}",
+                "sku": p.sku or "",
                 "name": p.name,
-                "price": prod_price,
-                "stock": prod_stock
+                "price": float(p.price or 0.0),
+                "stock": int(p.stock or 0)
             })
 
-        total_products_count = (await session.execute(select(func.count(RealProductDB.id)))).scalar() or 1003
+        total_products_count = (await session.execute(select(func.count(RealProductDB.id)))).scalar() or 0
 
     statuses_json = json.dumps(statuses_list)
     orders_json = json.dumps(orders_list)
     products_json = json.dumps(prods_list)
+
+    total_revenue = sum(float(o.get("price") or 0.0) for o in orders_list)
+
+    # Rótulos de integração derivados do estado real, não fixos no HTML.
+    db_engine_label = "PostgreSQL" if settings.DATABASE_URL.startswith("postgres") else "SQLite"
+    baselinker_label = "TOKEN CONFIGURADO" if settings.BASELINKER_API_TOKEN else "SEM TOKEN"
+    ml_label = (
+        "CREDENCIAIS CONFIGURADAS"
+        if os.getenv("ML_APP_ID") and os.getenv("ML_SECRET_KEY")
+        else "NÃO CONFIGURADO"
+    )
 
     html_template = f"""<!DOCTYPE html>
 <html lang="pt-BR">
@@ -284,8 +297,8 @@ async def get_web_ui():
         <div class="card card-glow" style="margin-bottom:20px; background:linear-gradient(90deg, rgba(37,99,235,0.12), rgba(6,182,212,0.08));">
           <div style="display:flex; justify-content:space-between; align-items:center;">
             <div>
-              <strong style="color:#fff; font-size:0.95rem;">⚡ Leitura 100% via Banco de Dados Interno + UI/UX KIRO Integration</strong>
-              <div style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">Gráficos Recharts/ChartJS, Feed de Atividades em Tempo Real e Ambient Glow integrados.</div>
+              <strong style="color:#fff; font-size:0.95rem;">⚡ Dados lidos do banco local</strong>
+              <div style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">Última carga vinda da API do BaseLinker. Use o botão ao lado para atualizar.</div>
             </div>
             <button class="btn btn-primary" onclick="syncWithBaseLinkerAPI()">
               <span class="material-icons">sync</span> Sincronizar com BaseLinker API
@@ -307,19 +320,19 @@ async def get_web_ui():
           <div class="card card-glow">
             <div class="kpi-title">PRODUTOS NO BANCO</div>
             <div class="kpi-value">{total_products_count} SKUs</div>
-            <div style="font-size:0.75rem; color:var(--text-muted); margin-top:8px;">Inventários Padrão & Defeitos</div>
+            <div style="font-size:0.75rem; color:var(--text-muted); margin-top:8px;">Total no inventário sincronizado</div>
           </div>
           <div class="card card-glow">
-            <div class="kpi-title">TAXA DE REQUISIÇÃO API</div>
-            <div class="kpi-value">0 req/min</div>
-            <span class="badge" style="background:rgba(6,182,212,0.15); color:var(--secondary); margin-top:8px;">Modo Economia Ativo</span>
+            <div class="kpi-title">FATURAMENTO DOS PEDIDOS</div>
+            <div class="kpi-value">R$ {total_revenue:,.2f}</div>
+            <div style="font-size:0.75rem; color:var(--text-muted); margin-top:8px;">Soma dos {len(orders_list)} pedidos carregados</div>
           </div>
         </div>
 
         <!-- Seção KIRO: Gráficos Interativos + Activity Feed -->
         <div class="dashboard-grid" style="margin-bottom:20px;">
           <div class="card card-glow">
-            <h3 style="font-size:0.95rem; font-weight:700; color:#fff; margin-bottom:16px;">📈 Tendência de Pedidos — Últimos 7 dias (KIRO Spec)</h3>
+            <h3 style="font-size:0.95rem; font-weight:700; color:#fff; margin-bottom:16px;">📈 Pedidos por dia — últimos 7 dias</h3>
             <div style="height:220px;">
               <canvas id="ordersChart"></canvas>
             </div>
@@ -432,66 +445,49 @@ async def get_web_ui():
       <div id="view-automations" style="display:none;">
         <div class="card card-glow" style="margin-bottom:20px;">
           <h3 style="font-size:1.1rem; font-weight:800; color:#fff; margin-bottom:12px; display:flex; align-items:center; gap:8px;">
-            <span class="material-icons" style="color:var(--amber)">bolt</span> Motor de Automações SE / ENTÃO (Workflow Rules Engine)
+            <span class="material-icons" style="color:var(--amber)">bolt</span> Motor de Automações SE / ENTÃO
           </h3>
-          <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:20px;">Configuração visual de gatilhos automáticos para eliminar o trabalho braçal da operação logístico-fiscal.</p>
-          
-          <div style="display:grid; grid-template-columns:repeat(2, 1fr); gap:16px;">
-            <div class="card" style="border-left:4px solid var(--green);">
-              <strong style="color:#fff;">1. Emissão Fiscal SEFAZ</strong>
-              <p style="font-size:0.8rem; color:var(--text-muted); margin:6px 0;"><strong>SE</strong> pedido pago <strong>ENTÃO</strong> emitir nota fiscal via FiscalAgent / FocusNFe.</p>
-              <span class="badge" style="background:rgba(16,185,129,0.15); color:var(--green)">ATIVA</span>
-            </div>
-            <div class="card" style="border-left:4px solid var(--secondary);">
-              <strong style="color:#fff;">2. Gerador de Etiquetas Térmicas</strong>
-              <p style="font-size:0.8rem; color:var(--text-muted); margin:6px 0;"><strong>SE</strong> nota autorizada <strong>ENTÃO</strong> gerar etiqueta ZPL/PDF via ShippingAgent.</p>
-              <span class="badge" style="background:rgba(6,182,212,0.15); color:var(--secondary)">ATIVA</span>
-            </div>
-            <div class="card" style="border-left:4px solid var(--purple);">
-              <strong style="color:#fff;">3. Atualização de Status "Pronto P/ Envio"</strong>
-              <p style="font-size:0.8rem; color:var(--text-muted); margin:6px 0;"><strong>SE</strong> etiqueta criada <strong>ENTÃO</strong> mover status e notificar Base.printer.</p>
-              <span class="badge" style="background:rgba(168,85,247,0.15); color:var(--purple)">ATIVA</span>
-            </div>
-            <div class="card" style="border-left:4px solid var(--primary);">
-              <strong style="color:#fff;">4. WhatsApp Rastreamento Pós-Venda</strong>
-              <p style="font-size:0.8rem; color:var(--text-muted); margin:6px 0;"><strong>SE</strong> pedido enviado <strong>ENTÃO</strong> enviar link de rastreamento no WhatsApp do cliente.</p>
-              <span class="badge" style="background:rgba(37,99,235,0.15); color:#60a5fa">ATIVA</span>
-            </div>
+          <div class="card" style="border-left:4px solid var(--amber);">
+            <strong style="color:#fff;">Não implementado</strong>
+            <p style="font-size:0.85rem; color:var(--text-muted); margin:8px 0 0;">
+              Não há motor de regras em execução. Nenhuma automação está ativa e nenhum
+              gatilho é disparado por este sistema hoje.
+            </p>
+            <p style="font-size:0.85rem; color:var(--text-muted); margin:8px 0 0;">
+              As automações configuradas na sua conta BaseLinker continuam funcionando lá,
+              de forma independente deste painel.
+            </p>
           </div>
         </div>
       </div>
 
-      <!-- View: 10 Marketplaces -->
+      <!-- View: Canais -->
       <div id="view-marketplaces" style="display:none;">
         <div class="card card-glow" style="margin-bottom:20px;">
-          <h3 style="font-size:1.1rem; font-weight:800; color:#fff; margin-bottom:16px; display:flex; align-items:center; gap:8px;">
-            <span class="material-icons" style="color:var(--secondary)">storefront</span> Central de Conexão dos 10 Marketplaces
+          <h3 style="font-size:1.1rem; font-weight:800; color:#fff; margin-bottom:8px; display:flex; align-items:center; gap:8px;">
+            <span class="material-icons" style="color:var(--secondary)">storefront</span> Canais de Venda
           </h3>
-          <div style="display:grid; grid-template-columns:repeat(5, 1fr); gap:14px;">
-            <div class="card" style="text-align:center;"><strong>Mercado Livre</strong><br><span class="badge" style="background:rgba(16,185,129,0.15); color:var(--green); margin-top:8px;">CONECTADO</span></div>
-            <div class="card" style="text-align:center;"><strong>Shopee</strong><br><span class="badge" style="background:rgba(16,185,129,0.15); color:var(--green); margin-top:8px;">CONECTADO</span></div>
-            <div class="card" style="text-align:center;"><strong>Amazon BR</strong><br><span class="badge" style="background:rgba(16,185,129,0.15); color:var(--green); margin-top:8px;">CONECTADO</span></div>
-            <div class="card" style="text-align:center;"><strong>Magalu</strong><br><span class="badge" style="background:rgba(16,185,129,0.15); color:var(--green); margin-top:8px;">CONECTADO</span></div>
-            <div class="card" style="text-align:center;"><strong>Shein</strong><br><span class="badge" style="background:rgba(16,185,129,0.15); color:var(--green); margin-top:8px;">CONECTADO</span></div>
-            <div class="card" style="text-align:center;"><strong>AliExpress</strong><br><span class="badge" style="background:rgba(16,185,129,0.15); color:var(--green); margin-top:8px;">CONECTADO</span></div>
-            <div class="card" style="text-align:center;"><strong>TikTok Shop</strong><br><span class="badge" style="background:rgba(16,185,129,0.15); color:var(--green); margin-top:8px;">CONECTADO</span></div>
-            <div class="card" style="text-align:center;"><strong>Netshoes</strong><br><span class="badge" style="background:rgba(16,185,129,0.15); color:var(--green); margin-top:8px;">CONECTADO</span></div>
-            <div class="card" style="text-align:center;"><strong>MadeiraMadeira</strong><br><span class="badge" style="background:rgba(16,185,129,0.15); color:var(--green); margin-top:8px;">CONECTADO</span></div>
-            <div class="card" style="text-align:center;"><strong>Americanas/CB</strong><br><span class="badge" style="background:rgba(16,185,129,0.15); color:var(--green); margin-top:8px;">CONECTADO</span></div>
-          </div>
+          <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:20px;">
+            Canais identificados nos pedidos já sincronizados. A origem dos dados é a API do
+            BaseLinker — não há conexão direta com os marketplaces.
+          </p>
+          <div id="channels-grid" style="display:grid; grid-template-columns:repeat(4, 1fr); gap:14px;"></div>
         </div>
       </div>
 
       <!-- View 4: Integrations -->
       <div id="view-integrations" style="display:none;">
         <div class="card card-glow" style="text-align:center;">
-          <h3 style="font-size:1.2rem; font-weight:800; color:var(--secondary); margin-bottom:24px;">🌐 Topologia de Integrações & Cache do Banco</h3>
+          <h3 style="font-size:1.2rem; font-weight:800; color:var(--secondary); margin-bottom:24px;">🌐 Integrações</h3>
           <div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:16px;">
-            <div class="card" style="border-color:var(--primary)"><strong>Banco de Dados Local</strong><br><span class="badge" style="background:rgba(16,185,129,0.15); color:var(--green); margin-top:8px;">SQLite / PostgreSQL Ativo</span></div>
-            <div class="card" style="border-color:var(--secondary)"><strong>BaseLinker API Cache</strong><br><span class="badge" style="background:rgba(6,182,212,0.15); color:var(--secondary); margin-top:8px;">Leitura do Banco (0 Req)</span></div>
-            <div class="card" style="border-color:var(--primary)"><strong>Bling ERP Sync</strong><br><span class="badge" style="background:rgba(16,185,129,0.15); color:var(--green); margin-top:8px;">Pronto P/ Sincronia</span></div>
-            <div class="card" style="border-color:var(--green)"><strong>🖨️ Base Printer Daemon</strong><br><span class="badge" style="background:rgba(16,185,129,0.15); color:var(--green); margin-top:8px;">Online Local</span></div>
+            <div class="card" style="border-color:var(--primary)"><strong>Banco de Dados Local</strong><br><span class="badge" style="background:rgba(16,185,129,0.15); color:var(--green); margin-top:8px;">{db_engine_label}</span></div>
+            <div class="card" style="border-color:var(--secondary)"><strong>BaseLinker API</strong><br><span class="badge" style="background:rgba(16,185,129,0.15); color:var(--green); margin-top:8px;">{baselinker_label}</span></div>
+            <div class="card" style="border-color:var(--border)"><strong>Mercado Livre (direto)</strong><br><span class="badge" style="background:rgba(148,163,184,0.15); color:var(--text-muted); margin-top:8px;">{ml_label}</span></div>
+            <div class="card" style="border-color:var(--border)"><strong>Bling ERP</strong><br><span class="badge" style="background:rgba(148,163,184,0.15); color:var(--text-muted); margin-top:8px;">NÃO IMPLEMENTADO</span></div>
           </div>
+          <p style="font-size:0.8rem; color:var(--text-muted); margin-top:16px;">
+            Impressão remota, emissão fiscal e integração com transportadoras não estão implementadas.
+          </p>
         </div>
       </div>
 
@@ -510,7 +506,7 @@ async def get_web_ui():
       </div>
       <div style="margin-top:20px; display:flex; justify-content:flex-end; gap:8px;">
         <button class="btn btn-outline" onclick="closeModal()">Fechar</button>
-        <button class="btn btn-primary" onclick="alert('Instrução de Emissão NF-e enviada ao FiscalAgent!')">Emitir NF-e</button>
+        <button class="btn btn-outline" onclick="alert('Emissão de NF-e não está implementada neste sistema. Nenhuma nota foi emitida.')" title="Funcionalidade não implementada">Emitir NF-e (indisponível)</button>
       </div>
     </div>
   </div>
@@ -628,37 +624,53 @@ async def get_web_ui():
           <td><input type="checkbox"></td>
           <td><strong>${{o.id}}</strong><br><span style="font-size:0.7rem; color:var(--text-muted);">(${{o.external_id || o.id}})</span></td>
           <td>
-            <span style="font-size:1.1rem; margin-right:4px;">🇧🇷</span> 
             <strong>${{o.customer}}</strong><br>
             <span class="carrier-tag" style="background:#EBF3FF; color:#0066FF;">${{o.channel.toLowerCase()}}</span>
           </td>
           <td><strong>1x</strong> ${{o.item.substring(0, 45)}}...</td>
           <td><strong>R$ ${{o.price.toFixed(2)}}</strong></td>
           <td>
-            <span class="status-pill" style="background:${{getStatusColor(o.status)}}">${{o.status}}</span><br>
-            <span class="carrier-tag">Mercado Envios / DPD</span>
-            <div style="margin-top:4px;">
-              <span class="feature-icon-tag tag-paid" title="Pago">P</span>
-              <span class="feature-icon-tag tag-money" title="Financeiro">$</span>
-              <span class="feature-icon-tag tag-truck" title="Expedição">🚚</span>
-              <span class="feature-icon-tag tag-doc" title="Nota Fiscal">📄</span>
-            </div>
+            <span class="status-pill" style="background:${{getStatusColor(o.status)}}">${{o.status}}</span>
           </td>
           <td><button class="btn-add-order" style="padding:4px 10px; font-size:0.75rem; background:transparent; border:1px solid var(--border); color:var(--text);" onclick="openOrderModal('${{o.id}}')">Detalhes</button></td>
         </tr>
       `).join('');
     }}
 
+    // Agrupa os pedidos reais por dia, cobrindo os ultimos 7 dias.
+    function serieUltimos7Dias() {{
+      const labels = [], valores = [];
+      const hoje = new Date();
+      for (let i = 6; i >= 0; i--) {{
+        const d = new Date(hoje);
+        d.setDate(hoje.getDate() - i);
+        const chave = String(d.getDate()).padStart(2,'0') + '/' + String(d.getMonth()+1).padStart(2,'0');
+        labels.push(chave);
+        // o campo date vem como "dd/mm/aaaa hh:mm"
+        valores.push(REAL_ORDERS.filter(o => (o.date || '').startsWith(chave)).length);
+      }}
+      return {{ labels, valores }};
+    }}
+
+    // Conta os pedidos reais por status, do maior para o menor.
+    function distribuicaoPorStatus() {{
+      const contagem = {{}};
+      REAL_ORDERS.forEach(o => contagem[o.status] = (contagem[o.status] || 0) + 1);
+      const pares = Object.entries(contagem).sort((a,b) => b[1] - a[1]);
+      return {{ labels: pares.map(p => p[0]), valores: pares.map(p => p[1]) }};
+    }}
+
     function initCharts() {{
-      // 1. Orders Chart (KIRO Area Chart)
+      const serie = serieUltimos7Dias();
+      // 1. Orders Chart
       const ctx1 = document.getElementById('ordersChart').getContext('2d');
       new Chart(ctx1, {{
         type: 'line',
         data: {{
-          labels: ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'],
+          labels: serie.labels,
           datasets: [{{
             label: 'Pedidos',
-            data: [42, 58, 35, 67, 89, 73, 28],
+            data: serie.valores,
             borderColor: '#2563eb',
             backgroundColor: 'rgba(37, 99, 235, 0.25)',
             fill: true,
@@ -676,15 +688,16 @@ async def get_web_ui():
         }}
       }});
 
-      // 2. Status Chart (KIRO Donut Chart)
+      // 2. Status Chart
+      const dist = distribuicaoPorStatus();
       const ctx2 = document.getElementById('statusChart').getContext('2d');
       new Chart(ctx2, {{
         type: 'doughnut',
         data: {{
-          labels: ['Novos', 'Separação', 'Pronto Envio', 'Enviado', 'Entregue'],
+          labels: dist.labels,
           datasets: [{{
-            data: [15, 25, 20, 30, 10],
-            backgroundColor: ['#2563eb', '#a855f7', '#10b981', '#06b6d4', '#f59e0b'],
+            data: dist.valores,
+            backgroundColor: dist.labels.map(l => getStatusColor(l)),
             borderWidth: 0
           }}]
         }},
@@ -715,21 +728,13 @@ async def get_web_ui():
           <td><input type="checkbox"></td>
           <td><strong>${{o.id}}</strong><br><span style="font-size:0.7rem; color:var(--text-muted);">(${{o.external_id || o.id}})</span></td>
           <td>
-            <span style="font-size:1.1rem; margin-right:4px;">🇧🇷</span> 
             <strong>${{o.customer}}</strong><br>
             <span class="carrier-tag" style="background:#EBF3FF; color:#0066FF;">${{o.channel.toLowerCase()}}</span>
           </td>
           <td><strong>1x</strong> ${{o.item.substring(0, 45)}}...</td>
           <td><strong>R$ ${{o.price.toFixed(2)}}</strong></td>
           <td>
-            <span class="status-pill" style="background:${{getStatusColor(o.status)}}">${{o.status}}</span><br>
-            <span class="carrier-tag">Correios / Envios</span>
-            <div style="margin-top:4px;">
-              <span class="feature-icon-tag tag-paid" title="Pago">P</span>
-              <span class="feature-icon-tag tag-money" title="Financeiro">$</span>
-              <span class="feature-icon-tag tag-truck" title="Expedição">🚚</span>
-              <span class="feature-icon-tag tag-doc" title="Nota Fiscal">📄</span>
-            </div>
+            <span class="status-pill" style="background:${{getStatusColor(o.status)}}">${{o.status}}</span>
           </td>
           <td><button class="btn-add-order" style="padding:4px 10px; font-size:0.75rem; background:transparent; border:1px solid var(--border); color:var(--text);" onclick="openOrderModal('${{o.id}}')">Detalhes</button></td>
         </tr>
@@ -756,21 +761,13 @@ async def get_web_ui():
           <td><input type="checkbox"></td>
           <td><strong>${{o.id}}</strong><br><span style="font-size:0.7rem; color:var(--text-muted);">(${{o.external_id || o.id}})</span></td>
           <td>
-            <span style="font-size:1.1rem; margin-right:4px;">🇧🇷</span> 
             <strong>${{o.customer}}</strong><br>
             <span class="carrier-tag" style="background:#EBF3FF; color:#0066FF;">${{o.channel.toLowerCase()}}</span>
           </td>
           <td><strong>1x</strong> ${{o.item.substring(0, 45)}}...</td>
           <td><strong>R$ ${{o.price.toFixed(2)}}</strong></td>
           <td>
-            <span class="status-pill" style="background:${{getStatusColor(o.status)}}">${{o.status}}</span><br>
-            <span class="carrier-tag">Mercado Envios / DPD</span>
-            <div style="margin-top:4px;">
-              <span class="feature-icon-tag tag-paid" title="Pago">P</span>
-              <span class="feature-icon-tag tag-money" title="Financeiro">$</span>
-              <span class="feature-icon-tag tag-truck" title="Expedição">🚚</span>
-              <span class="feature-icon-tag tag-doc" title="Nota Fiscal">📄</span>
-            </div>
+            <span class="status-pill" style="background:${{getStatusColor(o.status)}}">${{o.status}}</span>
           </td>
           <td><button class="btn-add-order" style="padding:4px 10px; font-size:0.75rem; background:transparent; border:1px solid var(--border); color:var(--text);" onclick="openOrderModal('${{o.id}}')">Detalhes</button></td>
         </tr>
@@ -830,30 +827,34 @@ async def get_web_ui():
 
     function openOrderModal(orderId) {{
       if (orderId === 'NEW') {{
-        const custName = prompt("Digite o nome do cliente para o novo pedido:");
-        if (!custName) return;
-        const itemTitle = prompt("Digite o título do produto/item:");
-        if (!itemTitle) return;
-        const priceVal = parseFloat(prompt("Digite o valor total (R$):", "199.90") || "199.90");
+        if (!confirm("Criar um pedido apenas nesta visualização?\n\nEle NÃO será gravado no banco nem enviado ao BaseLinker, e desaparece ao recarregar a página.")) return;
 
-        const newId = "ORD-MANUAL-" + Math.floor(1000 + Math.random() * 9000);
+        const custName = prompt("Nome do cliente:");
+        if (!custName) return;
+        const itemTitle = prompt("Título do produto/item:");
+        if (!itemTitle) return;
+        const priceVal = parseFloat(prompt("Valor total (R$):", "0.00") || "0");
+
+        const newId = "LOCAL-" + Math.floor(1000 + Math.random() * 9000);
+        // Campos não informados ficam vazios — preenchê-los com dados
+        // plausíveis inventados seria informação falsa no painel.
         const newOrder = {{
           id: newId,
-          external_id: "MANUAL-" + newId,
+          external_id: "",
           customer: custName,
-          email: custName.toLowerCase().replace(/\s+/g, '') + "@email.com",
-          phone: "(11) 99999-8888",
+          email: "",
+          phone: "",
           item: itemTitle,
-          sku: "SKU-MANUAL-01",
-          price: priceVal,
-          status_id: 316499,
+          sku: "",
+          price: isNaN(priceVal) ? 0 : priceVal,
+          status_id: 0,
           status: "Novos pedidos",
-          channel: "Mercado Livre",
+          channel: "Local (não sincronizado)",
           date: new Date().toLocaleDateString('pt-BR') + " " + new Date().toLocaleTimeString('pt-BR', {{hour: '2-digit', minute:'2-digit'}})
         }};
         REAL_ORDERS.unshift(newOrder);
         playBeepSound('success');
-        alert(`✅ Pedido #${{newId}} criado com sucesso no Banco!`);
+        alert(`Pedido ${{newId}} adicionado somente a esta visualização.`);
         renderDashboardOrders();
         renderOrdersTable();
         return;
@@ -869,7 +870,7 @@ async def get_web_ui():
       document.getElementById('modal-order-details').innerHTML = `
         <div style="background:var(--sidebar-bg); padding:12px; border-radius:6px; margin-bottom:12px;">
           <p><strong>ID do Pedido:</strong> ${{order.id}} | <strong>Ext ID:</strong> ${{order.external_id || 'N/A'}}</p>
-          <p><strong>Cliente:</strong> ${{order.customer}} (🇧🇷)</p>
+          <p><strong>Cliente:</strong> ${{order.customer}}</p>
           <p><strong>Email:</strong> ${{order.email || 'N/A'}} | <strong>Telefone:</strong> ${{order.phone || 'N/A'}}</p>
           <p><strong>Item Comprado:</strong> ${{order.item}} (SKU: <code>${{order.sku || 'SEM-SKU'}}</code>)</p>
           <p><strong>Valor Total:</strong> <strong style="color:var(--green)">R$ ${{order.price.toFixed(2)}}</strong></p>
@@ -945,24 +946,26 @@ async def get_web_ui():
       }});
     }}
 
+    // Atencao: as duas funcoes abaixo alteram apenas a lista em memoria desta
+    // aba. Nao gravam no banco nem no BaseLinker, e a alteracao some ao
+    // recarregar a pagina. O texto exibido deixa isso explicito.
     function updateOrderStatus(orderId, newStatus) {{
       const order = REAL_ORDERS.find(o => o.id === orderId);
       if(order) {{
         order.status = newStatus;
         playBeepSound('success');
-        alert(`Status do Pedido #${{orderId}} alterado para '${{newStatus}}'!`);
+        alert(`Status exibido do pedido #${{orderId}} alterado para '${{newStatus}}'.\n\nMudança apenas visual: não foi gravada no banco nem enviada ao BaseLinker.`);
         renderDashboardOrders();
         renderOrdersTable();
       }}
     }}
 
     function deleteOrder(orderId) {{
-      if(confirm(`Tem certeza que deseja excluir/cancelar o pedido #${{orderId}}?`)) {{
+      if(confirm(`Remover o pedido #${{orderId}} desta visualização?\n\nIsso NÃO exclui o pedido no banco nem no BaseLinker — ele reaparece ao recarregar a página.`)) {{
         const idx = REAL_ORDERS.findIndex(o => o.id === orderId);
         if(idx !== -1) {{
           REAL_ORDERS.splice(idx, 1);
           playBeepSound('success');
-          alert(`Pedido #${{orderId}} removido com sucesso.`);
           closeModal();
           renderDashboardOrders();
           renderOrdersTable();
@@ -995,37 +998,44 @@ async def get_web_ui():
           alert('❌ Erro na bipagem do produto.');
         }}
       }})
-      .catch(() => {{
-        playBeepSound('success');
-        updateOrderStatus(orderId, "Pronto P/ Envio");
-        alert(`✅ Bipagem Confirmada no Pedido #${{orderId}}! Item verificado.`);
-        closeModal();
+      .catch(e => {{
+        playBeepSound('error');
+        alert(`Falha ao registrar a bipagem do pedido #${{orderId}}.\n\nMotivo: ${{e.message}}\n\nO status não foi alterado.`);
       }});
     }}
 
     function triggerIssueNFe(orderId) {{
       fetch(`/orders/${{orderId}}/issue-nfe`, {{ method: 'POST' }})
-      .then(r => r.json())
-      .then(data => {{
-        playBeepSound('success');
-        alert(`📄 NF-e Autorizada na SEFAZ com Sucesso!\nNúmero NF: ${{data.nfe_details.nfe_number}}\nURL PDF: ${{data.nfe_details.pdf_url}}`);
+      .then(r => {{
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
       }})
-      .catch(() => {{
+      .then(data => {{
+        const nfe = data && data.nfe_details;
+        if (!nfe || !nfe.nfe_number) throw new Error('resposta sem dados da nota');
         playBeepSound('success');
-        alert(`📄 NF-e Autorizada com Sucesso na SEFAZ para o pedido #${{orderId}}!\nChave: 35260800000000000000550010000000011000000000`);
+        alert(`NF-e emitida.\nNúmero: ${{nfe.nfe_number}}\nPDF: ${{nfe.pdf_url || '(não informado)'}}`);
+      }})
+      .catch(e => {{
+        playBeepSound('error');
+        alert(`Não foi possível emitir a NF-e do pedido #${{orderId}}.\n\nMotivo: ${{e.message}}\n\nA emissão fiscal não está integrada à SEFAZ neste sistema.`);
       }});
     }}
 
     function triggerReverseSync(orderId) {{
       fetch(`/orders/${{orderId}}/sync-reverse`, {{ method: 'POST' }})
-      .then(r => r.json())
-      .then(data => {{
-        playBeepSound('success');
-        alert(`🔄 Sincronização Reversa Concluída!\nCódigo de Rastreio enviado ao Marketplace: ${{data.tracking_code}}`);
+      .then(r => {{
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
       }})
-      .catch(() => {{
+      .then(data => {{
+        if (!data || !data.tracking_code) throw new Error('resposta sem código de rastreio');
         playBeepSound('success');
-        alert(`🔄 Sincronização Reversa Concluída para o pedido #${{orderId}}! Rastreio enviado ao Canal.`);
+        alert(`Rastreio enviado ao canal.\nCódigo: ${{data.tracking_code}}`);
+      }})
+      .catch(e => {{
+        playBeepSound('error');
+        alert(`Falha na sincronização reversa do pedido #${{orderId}}.\n\nMotivo: ${{e.message}}`);
       }});
     }}
 
@@ -1046,16 +1056,22 @@ async def get_web_ui():
         return;
       }}
       
+      // Estas quatro acoes nao possuem implementacao. Informar isso e o
+      // comportamento correto -- anunciar disparo que nao acontece, nao e.
+      const naoImplementadas = {{
+        email: 'Envio de e-mail/WhatsApp',
+        nfe: 'Emissão de NF-e em lote',
+        print: 'Impressão de etiquetas',
+        ship: 'Despacho de pacotes'
+      }};
+      if (naoImplementadas[actionType]) {{
+        playBeepSound('error');
+        alert(`${{naoImplementadas[actionType]}} não está implementado.\n\nNenhuma ação foi executada sobre ${{checkedCount || 0}} pedido(s) selecionado(s).`);
+        return;
+      }}
+
       playBeepSound('success');
-      if (actionType === 'email') {{
-        alert(`📧 Disparando e-mails/WhatsApp de notificação pós-venda para ${{checkedCount || 'todos os'}} pedidos.`);
-      }} else if (actionType === 'nfe') {{
-        alert(`📄 Disparando emissão em lote de NF-e na SEFAZ para ${{checkedCount || 'todos os'}} pedidos.`);
-      }} else if (actionType === 'print') {{
-        alert(`🖨️ Enviando ${{checkedCount || 'todas as'}} etiquetas térmicas ZPL para o daemon local Base.printer!`);
-      }} else if (actionType === 'ship') {{
-        alert(`🚚 Despachando ${{checkedCount || 'todos os'}} pacotes e alterando status para 'Enviado'!`);
-      }} else if (actionType === 'sort') {{
+      if (actionType === 'sort') {{
         REAL_ORDERS.sort((a, b) => b.price - a.price);
         renderOrdersTable();
         alert("Tabela ordenada por Maior Valor!");
