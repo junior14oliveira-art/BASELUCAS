@@ -6,7 +6,16 @@
  * Gradual sync: large datasets fetched in pages with localStorage cache
  */
 
-import type { BLResponse } from "./types";
+import type {
+  BLResponse,
+  BLPaymentHistoryEntry,
+  BLPrintoutTemplate,
+  BLPackageDetails,
+  BLReturnReason,
+  BLDocumentSeries,
+  BLLocationType,
+  BLCrmStatusGroup,
+} from "./types";
 
 const PROXY_ENDPOINT = "/api/bl";
 const RATE_LIMIT = 95;       // stay under 100/min with margin
@@ -365,4 +374,187 @@ export const bl = {
     BaseLinkClient.call("deleteInventoryWarehouseLocation", p),
   createPackageManual: (p: Record<string, unknown>) =>
     BaseLinkClient.call("createPackageManual", p),
+
+  // ─── Orders advanced ────────────────────────────────────────────────────────
+
+  setOrderProductFields: (p: Record<string, unknown>) =>
+    BaseLinkClient.call("setOrderProductFields", p),
+  getOrderPaymentsHistory: (orderId: number, showFullHistory = false) =>
+    BaseLinkClient.call<{ payments?: BLPaymentHistoryEntry[] }>("getOrderPaymentsHistory", {
+      order_id: orderId,
+      show_full_history: showFullHistory,
+    }),
+  getOrderTransactionData: (orderId: number) =>
+    BaseLinkClient.call("getOrderTransactionData", { order_id: orderId }),
+  getOrderExtraFields: () => BaseLinkClient.call("getOrderExtraFields"),
+  getOrderPickPackHistory: (orderId: number, action?: number) =>
+    BaseLinkClient.call("getOrderPickPackHistory", { order_id: orderId, action_type: action }),
+  getOrderPrintoutTemplates: () =>
+    BaseLinkClient.call<{ printouts?: BLPrintoutTemplate[] }>("getOrderPrintoutTemplates"),
+
+  // Order status CRUD
+  addOrderStatus: (p: Record<string, unknown>) => BaseLinkClient.call("addOrderStatus", p),
+  deleteOrderStatus: (statusId: number, replacementStatusId?: number) =>
+    BaseLinkClient.call("deleteOrderStatus", {
+      status_id: statusId,
+      replacement_status_id: replacementStatusId,
+    }),
+  addOrderStatusGroup: (p: Record<string, unknown>) =>
+    BaseLinkClient.call("addOrderStatusGroup", p),
+  deleteOrderStatusGroup: (groupId: number) =>
+    BaseLinkClient.call("deleteOrderStatusGroup", { group_id: groupId }),
+
+  // PickPack advanced
+  deletePickPackCartOrders: (cartId: number) =>
+    BaseLinkClient.call("deletePickPackCartOrders", { cart_id: cartId }),
+  getPickPackOrderCart: (orderId: number) =>
+    BaseLinkClient.call("getPickPackOrderCart", { order_id: orderId }),
+
+  // ─── Fiscal ─────────────────────────────────────────────────────────────────
+
+  getSeries: () => BaseLinkClient.call<{ series?: BLDocumentSeries[] }>("getSeries"),
+  addInvoiceCorrection: (p: Record<string, unknown>) =>
+    BaseLinkClient.call("addInvoiceCorrection", p),
+  addOrderInvoiceFile: (invoiceId: number, file: string, externalInvoiceNumber?: string) =>
+    BaseLinkClient.call("addOrderInvoiceFile", {
+      invoice_id: invoiceId,
+      file,
+      external_invoice_number: externalInvoiceNumber,
+    }),
+  addOrderReceiptFile: (receiptId: number, file: string, externalReceiptNumber?: string) =>
+    BaseLinkClient.call("addOrderReceiptFile", {
+      receipt_id: receiptId,
+      file,
+      external_receipt_number: externalReceiptNumber,
+    }),
+  getReceipt: (receiptId?: number, orderId?: number) =>
+    BaseLinkClient.call("getReceipt", { receipt_id: receiptId, order_id: orderId }),
+
+  // ─── Returns ────────────────────────────────────────────────────────────────
+
+  addOrderReturnProduct: (p: Record<string, unknown>) =>
+    BaseLinkClient.call("addOrderReturnProduct", p),
+  deleteOrderReturnProduct: (returnId: number, returnProductId: number) =>
+    BaseLinkClient.call("deleteOrderReturnProduct", {
+      return_id: returnId,
+      return_product_id: returnProductId,
+    }),
+  setOrderReturnProductFields: (p: Record<string, unknown>) =>
+    BaseLinkClient.call("setOrderReturnProductFields", p),
+  setOrderReturnRefund: (p: Record<string, unknown>) =>
+    BaseLinkClient.call("setOrderReturnRefund", p),
+  setOrderReturnStatuses: (returnIds: number[], statusId: number) =>
+    BaseLinkClient.call("setOrderReturnStatuses", { return_ids: returnIds, status_id: statusId }),
+  getOrderReturnJournalList: (p: Record<string, unknown> = {}) =>
+    BaseLinkClient.call("getOrderReturnJournalList", p),
+  getOrderReturnPaymentsHistory: (returnId: number, showFullHistory = false) =>
+    BaseLinkClient.call<{ payments?: BLPaymentHistoryEntry[] }>("getOrderReturnPaymentsHistory", {
+      return_id: returnId,
+      show_full_history: showFullHistory,
+    }),
+  getOrderReturnReasonsList: () =>
+    BaseLinkClient.call<{ reasons?: BLReturnReason[] }>("getOrderReturnReasonsList"),
+  getOrderReturnProductStatuses: () =>
+    BaseLinkClient.call("getOrderReturnProductStatuses"),
+  getOrderReturnExtraFields: () => BaseLinkClient.call("getOrderReturnExtraFields"),
+  getOrderReturnStatusGroups: () => BaseLinkClient.call("getOrderReturnStatusGroups"),
+  addOrderReturnStatus: (p: Record<string, unknown>) =>
+    BaseLinkClient.call("addOrderReturnStatus", p),
+  deleteOrderReturnStatus: (statusId: number, replacementStatusId?: number) =>
+    BaseLinkClient.call("deleteOrderReturnStatus", {
+      status_id: statusId,
+      replacement_status_id: replacementStatusId,
+    }),
+  addOrderReturnStatusGroup: (p: Record<string, unknown>) =>
+    BaseLinkClient.call("addOrderReturnStatusGroup", p),
+  deleteOrderReturnStatusGroup: (groupId: number) =>
+    BaseLinkClient.call("deleteOrderReturnStatusGroup", { group_id: groupId }),
+
+  // ─── Courier ────────────────────────────────────────────────────────────────
+
+  getPackageDetails: (p: Record<string, unknown>) =>
+    BaseLinkClient.call<BLPackageDetails>("getPackageDetails", p),
+  getCourierServices: (p: Record<string, unknown>) =>
+    BaseLinkClient.call("getCourierServices", p),
+  getCourierDocument: (p: Record<string, unknown>) =>
+    BaseLinkClient.call("getCourierDocument", p),
+  getProtocol: (p: Record<string, unknown>) => BaseLinkClient.call("getProtocol", p),
+  getRequestParcelPickupFields: (courierCode: string) =>
+    BaseLinkClient.call("getRequestParcelPickupFields", { courier_code: courierCode }),
+  runRequestParcelPickup: (p: Record<string, unknown>) =>
+    BaseLinkClient.call("runRequestParcelPickup", p),
+
+  // ─── CRM ────────────────────────────────────────────────────────────────────
+
+  getCrmClientExtraFields: () => BaseLinkClient.call("getCrmClientExtraFields"),
+  getCrmClientStatusGroups: () =>
+    BaseLinkClient.call<{ groups?: BLCrmStatusGroup[] }>("getCrmClientStatusGroups"),
+  addCrmClientStatus: (p: Record<string, unknown>) =>
+    BaseLinkClient.call("addCrmClientStatus", p),
+  deleteCrmClientStatus: (statusId: number) =>
+    BaseLinkClient.call("deleteCrmClientStatus", { status_id: statusId }),
+  addCrmClientStatusGroup: (p: Record<string, unknown>) =>
+    BaseLinkClient.call("addCrmClientStatusGroup", p),
+  deleteCrmClientStatusGroup: (groupId: number) =>
+    BaseLinkClient.call("deleteCrmClientStatusGroup", { group_id: groupId }),
+
+  // ─── Inventory extras ───────────────────────────────────────────────────────
+
+  deleteInventoryCategory: (inventoryId: number, categoryId: number) =>
+    BaseLinkClient.call("deleteInventoryCategory", {
+      inventory_id: inventoryId,
+      category_id: categoryId,
+    }),
+  addInventoryManufacturer: (p: Record<string, unknown>) =>
+    BaseLinkClient.call("addInventoryManufacturer", p),
+  deleteInventoryManufacturer: (manufacturerId: number) =>
+    BaseLinkClient.call("deleteInventoryManufacturer", { manufacturer_id: manufacturerId }),
+  deleteInventoryPriceGroup: (priceGroupId: number) =>
+    BaseLinkClient.call("deleteInventoryPriceGroup", { price_group_id: priceGroupId }),
+  getInventoryExtraFields: () => BaseLinkClient.call("getInventoryExtraFields"),
+  getInventoryIntegrations: (inventoryId: number) =>
+    BaseLinkClient.call("getInventoryIntegrations", { inventory_id: inventoryId }),
+  getInventoryAvailableTextFieldKeys: (inventoryId: number) =>
+    BaseLinkClient.call("getInventoryAvailableTextFieldKeys", { inventory_id: inventoryId }),
+  getInventoryPrintoutTemplates: () =>
+    BaseLinkClient.call<{ printouts?: BLPrintoutTemplate[] }>("getInventoryPrintoutTemplates"),
+  getInventoryPayers: (p: Record<string, unknown> = {}) =>
+    BaseLinkClient.call("getInventoryPayers", p),
+  addInventoryPayer: (p: Record<string, unknown>) => BaseLinkClient.call("addInventoryPayer", p),
+  deleteInventoryPayer: (payerId: number) =>
+    BaseLinkClient.call("deleteInventoryPayer", { payer_id: payerId }),
+
+  // ─── WMS: maps and location types ───────────────────────────────────────────
+
+  getInventoryMapDetails: (p: Record<string, unknown>) =>
+    BaseLinkClient.call("getInventoryMapDetails", p),
+  getInventoryWarehouseLocationTypes: (p: Record<string, unknown> = {}) =>
+    BaseLinkClient.call<{ types?: BLLocationType[] }>("getInventoryWarehouseLocationTypes", p),
+  addInventoryWarehouseLocationType: (p: Record<string, unknown>) =>
+    BaseLinkClient.call("addInventoryWarehouseLocationType", p),
+  deleteInventoryWarehouseLocationType: (p: Record<string, unknown>) =>
+    BaseLinkClient.call("deleteInventoryWarehouseLocationType", p),
+
+  // ─── Documents, purchase orders, transfers, fulfillment ─────────────────────
+
+  addInventoryDocumentFile: (p: Record<string, unknown>) =>
+    BaseLinkClient.call("addInventoryDocumentFile", p),
+  getInventoryDocumentSeries: (p: Record<string, unknown> = {}) =>
+    BaseLinkClient.call<{ series?: BLDocumentSeries[] }>("getInventoryDocumentSeries", p),
+  getInventoryPurchaseOrderItems: (p: Record<string, unknown>) =>
+    BaseLinkClient.call("getInventoryPurchaseOrderItems", p),
+  getInventoryPurchaseOrderLogs: (p: Record<string, unknown>) =>
+    BaseLinkClient.call("getInventoryPurchaseOrderLogs", p),
+  getInventoryPurchaseOrderSeries: (p: Record<string, unknown> = {}) =>
+    BaseLinkClient.call<{ series?: BLDocumentSeries[] }>("getInventoryPurchaseOrderSeries", p),
+  addInventoryPurchaseOrderFile: (p: Record<string, unknown>) =>
+    BaseLinkClient.call("addInventoryPurchaseOrderFile", p),
+  getInventoryPurchaseOrderFile: (p: Record<string, unknown>) =>
+    BaseLinkClient.call("getInventoryPurchaseOrderFile", p),
+  getInventoryTransferItems: (p: Record<string, unknown>) =>
+    BaseLinkClient.call("getInventoryTransferItems", p),
+  getInventoryTransferSeries: (p: Record<string, unknown> = {}) =>
+    BaseLinkClient.call<{ series?: BLDocumentSeries[] }>("getInventoryTransferSeries", p),
+  runInventoryFulfillmentDeliverySubmission: (p: Record<string, unknown>) =>
+    BaseLinkClient.call("runInventoryFulfillmentDeliverySubmission", p),
 };

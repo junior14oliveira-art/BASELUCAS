@@ -296,3 +296,78 @@ export interface BLSupplier {
   postcode: string;
   country_code: string;
 }
+
+// ─── Payments history (orders and returns) ───────────────────────────────────
+
+export interface BLPaymentHistoryEntry {
+  paid_before: number;
+  paid_after: number;
+  total_price: number;
+  currency: string;
+  external_payment_id: string;
+  date: number;
+  comment?: string;
+}
+
+// ─── Printout templates (orders and products) ────────────────────────────────
+
+export interface BLPrintoutTemplate {
+  printout_id: number;
+  name: string;
+  type?: string;
+  /** Present on order printouts that render to a physical page format. */
+  page_format?: string;
+}
+
+// ─── Courier package details ─────────────────────────────────────────────────
+
+export interface BLPackageDetails {
+  package_id: number;
+  courier_package_nr: string;
+  courier_code: string;
+  courier_inner_number?: string;
+  order_id?: number;
+  packages?: Array<{
+    package_nr: string;
+    weight?: number;
+    width?: number;
+    height?: number;
+    length?: number;
+  }>;
+  /** Courier-specific fields, keyed by the field id from getCourierFields. */
+  fields?: Record<string, unknown>;
+}
+
+// ─── Return reasons ──────────────────────────────────────────────────────────
+
+export interface BLReturnReason {
+  reason_id: number;
+  name: string;
+}
+
+// ─── Document series (invoices, documents, POs, transfers) ───────────────────
+
+export interface BLDocumentSeries {
+  series_id: number;
+  type: string;
+  name: string;
+  format?: string;
+  /** Next number the series will issue. */
+  next_number?: number;
+}
+
+// ─── WMS location types ──────────────────────────────────────────────────────
+
+export interface BLLocationType {
+  location_type_id: number;
+  name: string;
+  warehouse_id?: string;
+}
+
+// ─── CRM status groups ───────────────────────────────────────────────────────
+
+export interface BLCrmStatusGroup {
+  group_id: number;
+  name: string;
+  statuses?: Array<{ status_id: number; name: string; color?: string }>;
+}

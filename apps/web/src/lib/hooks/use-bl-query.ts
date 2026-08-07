@@ -7,6 +7,7 @@ import { bl } from "@/lib/baselinker/client";
 import type {
   BLOrder, BLOrderStatus, BLInventory, BLWarehouse,
   BLPickPackCart, BLCrmClient, BLSupplier,
+  BLPaymentHistoryEntry, BLDocumentSeries, BLReturnReason, BLCrmStatusGroup,
 } from "@/lib/baselinker/types";
 
 // ─── Orders ──────────────────────────────────────────────────────────────────
@@ -290,5 +291,69 @@ export function useOrderSources() {
     queryFn: () => bl.getOrderSources(),
     staleTime: 10 * 60_000,
     select: (d) => (d as { sources?: { id: number; name: string; type: string }[] })?.sources ?? [],
+  });
+}
+
+// ─── Sprint 0: hooks for the newly wired methods ─────────────────────────────
+
+/** Payment timeline of an order. */
+export function useOrderPaymentsHistory(orderId: number, showFullHistory = false) {
+  return useQuery({
+    queryKey: ["order-payments-history", orderId, showFullHistory],
+    queryFn: () => bl.getOrderPaymentsHistory(orderId, showFullHistory),
+    enabled: !!orderId,
+    staleTime: 30_000,
+    select: (d) => (d as { payments?: BLPaymentHistoryEntry[] })?.payments ?? [],
+  });
+}
+
+/** Numbering series available for invoices and receipts. */
+export function useSeries() {
+  return useQuery({
+    queryKey: ["series"],
+    queryFn: () => bl.getSeries(),
+    staleTime: 10 * 60_000,
+    select: (d) => (d as { series?: BLDocumentSeries[] })?.series ?? [],
+  });
+}
+
+/** Reasons selectable when registering a return. */
+export function useReturnReasons() {
+  return useQuery({
+    queryKey: ["return-reasons"],
+    queryFn: () => bl.getOrderReturnReasonsList(),
+    staleTime: 10 * 60_000,
+    select: (d) => (d as { reasons?: BLReturnReason[] })?.reasons ?? [],
+  });
+}
+
+/** Full detail of a courier package, including per-parcel data. */
+export function usePackageDetails(packageId: number) {
+  return useQuery({
+    queryKey: ["package-details", packageId],
+    queryFn: () => bl.getPackageDetails({ package_id: packageId }),
+    enabled: !!packageId,
+    staleTime: 60_000,
+  });
+}
+
+/** Numbering series for inventory documents. */
+export function useInventoryDocumentSeries(inventoryId?: number) {
+  return useQuery({
+    queryKey: ["inventory-document-series", inventoryId],
+    queryFn: () =>
+      bl.getInventoryDocumentSeries(inventoryId ? { inventory_id: inventoryId } : {}),
+    staleTime: 10 * 60_000,
+    select: (d) => (d as { series?: BLDocumentSeries[] })?.series ?? [],
+  });
+}
+
+/** CRM status groups with their nested statuses. */
+export function useCrmStatusGroups() {
+  return useQuery({
+    queryKey: ["crm-status-groups"],
+    queryFn: () => bl.getCrmClientStatusGroups(),
+    staleTime: 10 * 60_000,
+    select: (d) => (d as { groups?: BLCrmStatusGroup[] })?.groups ?? [],
   });
 }
