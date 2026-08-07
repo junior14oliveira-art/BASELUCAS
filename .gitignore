@@ -1,0 +1,28 @@
+# Environment Variables & Tokens
+.env
+.env.local
+.env.production
+*.env
+
+# Python & Databases
+__pycache__/
+*.py[cod]
+*$py.class
+*.db
+*.sqlite
+*.sqlite3
+omnichannel*.db
+.pytest_cache/
+
+# Node & Next.js
+node_modules/
+.next/
+out/
+build/
+dist/
+
+# IDE & OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
