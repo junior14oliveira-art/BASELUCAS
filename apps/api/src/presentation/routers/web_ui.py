@@ -1,10 +1,16 @@
 from fastapi import APIRouter
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select, func
 from src.infrastructure.database import async_session, RealOrderStatusDB, RealOrderDB, RealProductDB
 import json
 
 router = APIRouter(tags=["Frontend Web UI"])
+
+@router.get("/", include_in_schema=False)
+async def root_redirect():
+    """Abrir a raiz leva direto para a interface, em vez de devolver 404."""
+    return RedirectResponse(url="/app")
+
 
 @router.get("/app", response_class=HTMLResponse)
 @router.get("/dashboard-ui", response_class=HTMLResponse)
@@ -171,6 +177,9 @@ async def get_web_ui():
 
     .assistant-drawer {{ position: fixed; right: -400px; top: 0; bottom: 0; width: 400px; background-color: var(--surface); border-left: 1px solid var(--border); box-shadow: -8px 0 24px rgba(0,0,0,0.15); z-index: 1000; transition: right 0.3s; display: flex; flex-direction: column; }}
     .assistant-drawer.open {{ right: 0; }}
+
+    /* Spinner do botão de sincronização */
+    @keyframes spin {{ from {{ transform: rotate(0deg); }} to {{ transform: rotate(360deg); }} }}
   </style>
 </head>
 <body class="theme-light">
@@ -529,6 +538,48 @@ async def get_web_ui():
     const REAL_PRODUCTS = {products_json};
 
     let activeStatusFilter = 'Todos os pedidos';
+    let globalSearchTerm = '';
+
+    // Busca global — casa o termo contra os campos textuais do registro.
+    function matchesSearch(fields) {{
+      if (!globalSearchTerm) return true;
+      return fields.some(v => String(v == null ? '' : v).toLowerCase().includes(globalSearchTerm));
+    }}
+
+    function filterGlobalData(term) {{
+      globalSearchTerm = (term || '').trim().toLowerCase();
+      renderDashboardOrders();
+      renderOrdersTable();
+      renderProductsTable();
+    }}
+
+    // A tela é renderizada no servidor a partir do banco, então após o
+    // sincronismo é preciso recarregar para ver os dados novos.
+    async function syncWithBaseLinkerAPI() {{
+      const btn = document.querySelector('button[onclick="syncWithBaseLinkerAPI()"]');
+      const originalHtml = btn ? btn.innerHTML : '';
+      if (btn) {{
+        btn.disabled = true;
+        btn.innerHTML = '<span class="material-icons-round" style="animation:spin 1s linear infinite;">sync</span> Sincronizando...';
+      }}
+      try {{
+        const res = await fetch('/api/v1/orders/sync-now', {{ method: 'POST' }});
+        if (!res.ok) throw new Error('HTTP ' + res.status + ' ' + res.statusText);
+        const data = await res.json();
+        const s = data.stats || {{}};
+        alert(
+          'Sincronização concluída.\\n\\n' +
+          'Status: ' + (s.statuses_synced || 0) + '\\n' +
+          'Pedidos: ' + (s.orders_synced || 0) + '\\n' +
+          'Produtos: ' + (s.products_synced || 0) + '\\n\\n' +
+          'A página será recarregada.'
+        );
+        location.reload();
+      }} catch (e) {{
+        if (btn) {{ btn.disabled = false; btn.innerHTML = originalHtml; }}
+        alert('Falha ao sincronizar com o BaseLinker:\\n' + e.message);
+      }}
+    }}
 
     function toggleDarkTheme() {{
       document.body.classList.toggle('theme-dark');
@@ -631,7 +682,9 @@ async def get_web_ui():
 
     function renderDashboardOrders() {{
       const tbody = document.getElementById('dashboard-orders-body');
-      tbody.innerHTML = REAL_ORDERS.slice(0, 15).map(o => `
+      if (!tbody) return;
+      const visible = REAL_ORDERS.filter(o => matchesSearch([o.id, o.external_id, o.customer, o.item, o.sku, o.channel, o.status]));
+      tbody.innerHTML = visible.slice(0, 15).map(o => `
         <tr>
           <td><input type="checkbox"></td>
           <td><strong>${{o.id}}</strong><br><span style="font-size:0.7rem; color:var(--text-muted);">(${{o.external_id || o.id}})</span></td>
@@ -659,11 +712,18 @@ async def get_web_ui():
 
     function renderOrdersTable() {{
       const tbody = document.getElementById('orders-table-body');
-      const filtered = activeStatusFilter === 'Todos os pedidos' 
-        ? REAL_ORDERS 
+      if (!tbody) return;
+      const byStatus = activeStatusFilter === 'Todos os pedidos'
+        ? REAL_ORDERS
         : REAL_ORDERS.filter(o => o.status === activeStatusFilter);
+      const filtered = byStatus.filter(o => matchesSearch([o.id, o.external_id, o.customer, o.item, o.sku, o.channel, o.status]));
 
-      document.getElementById('orders-title').innerText = `Pedidos Gravados no Banco (${{filtered.length}})`;
+      const titleEl = document.getElementById('orders-title');
+      if (titleEl) {{
+        titleEl.innerText = globalSearchTerm
+          ? `Pedidos — busca "${{globalSearchTerm}}" (${{filtered.length}})`
+          : `Pedidos Gravados no Banco (${{filtered.length}})`;
+      }}
 
       tbody.innerHTML = filtered.map(o => `
         <tr>
@@ -722,7 +782,9 @@ async def get_web_ui():
 
     function renderProductsTable() {{
       const tbody = document.getElementById('products-table-body');
-      tbody.innerHTML = REAL_PRODUCTS.map(p => `
+      if (!tbody) return;
+      const visible = REAL_PRODUCTS.filter(p => matchesSearch([p.sku, p.name, p.id]));
+      tbody.innerHTML = visible.map(p => `
         <tr>
           <td><code style="background:var(--blue-light); color:var(--primary); padding:3px 6px; border-radius:4px; font-weight:700;">${{p.sku}}</code></td>
           <td><strong style="color:var(--text);">${{p.name}}</strong></td>
