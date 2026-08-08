@@ -2,7 +2,6 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { bl } from "@/lib/baselinker/client";
 import { Bell, ShoppingCart, Package, CreditCard, RefreshCcw, Truck, FileText, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatRelative } from "@/lib/utils";
@@ -34,9 +33,11 @@ export function NotificationsPanel() {
 
   const { data } = useQuery({
     queryKey: ["journal-notif"],
-    queryFn: () => bl.getJournalList(lastSeen),
-    staleTime: 15_000,
-    refetchInterval: 30_000,
+    // Notificações BaseLinker desligadas — fonte operacional é o cache ML
+    queryFn: async () => ({ logs: [] as LogEntry[] }),
+    staleTime: Infinity,
+    refetchInterval: false,
+    enabled: false,
   });
 
   const rawLogs = (data as { logs?: LogEntry[] })?.logs ?? [];

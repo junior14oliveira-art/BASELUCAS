@@ -54,16 +54,19 @@ PYTHON4MC/
 └── .env.example
 ```
 
-## 🔄 Fluxo de Dados
+## 🔄 Fluxo de Dados (atual — BASE ANTIGRAVITY)
 
 ```
-Frontend (React)
+UI /app (ou front molde)
     ↓↑ (HTTP REST)
-Backend (FastAPI)
+Backend FastAPI (apps/api)
     ↓↑ (SQL)
-Database (PostgreSQL)
-    ↓↑ (Sync jobs)
-BaseLinker API
+SQLite omnichannel_real.db
+    ↑ (sync on-demand only)
+4MC Market API → Mercado Livre (READ-ONLY)
+  /ml/feed  /ml/orders  /ml/token
+
+BaseLinker = molde de UI/UX, NÃO fonte de dados de produção.
 ```
 
 ## 🐳 Executar Tudo com Docker Compose

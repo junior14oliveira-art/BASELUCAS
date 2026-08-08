@@ -1,74 +1,53 @@
-# JRDEV1 — Sistema de Gestão BaseLinker
+# JRDEV1 — BASE ANTIGRAVITY (nosso BaseLinker)
 
-Sistema completo de gestão de e-commerce construído sobre a API BaseLinker.  
-Layout inspirado no painel Base, UX guiado pelas 10 Heurísticas de Nielsen.
+Hub de gestão de e-commerce da **4M&C**: UI/UX **inspirada** no painel BaseLinker (molde), com **dados reais do Mercado Livre** via API read-only 4MC + cache SQLite local.
+
+> Não é “sistema construído sobre a API BaseLinker”. BaseLinker = referência visual/operacional; produção = ML/4MC.
 
 ## Stack
 
-- **Next.js 14** (App Router) + TypeScript
-- **Tailwind CSS** + design tokens customizados (paleta BaseLinker)
-- **TanStack Query** — cache inteligente + polling automático
-- **Zustand** — estado global (auth + UI)
-- **@dnd-kit** — drag-and-drop Kanban PickPack
-- **Recharts** — gráficos de receita e status
-- **Sonner** — notificações toast
+- **FastAPI** (`apps/api`) — sync ML → SQLite + UI `/app`
+- **SQLite** `omnichannel_real.db` — fonte das telas após sync
+- **Next.js / KIRO** — molde de UI (legado/referência de UX)
+- Design tokens e heurísticas de Nielsen (experiência estilo Base)
 
-## Módulos implementados
+## Fonte de dados (produção)
 
-| Módulo | Rota | Endpoints |
-|---|---|---|
-| Dashboard | `/dashboard` | getOrders, getJournalList |
-| Pedidos | `/orders` | getOrders, setOrderStatus, deleteOrders |
-| Detalhe Pedido | `/orders/[id]` | setOrderFields, addInvoice, createPackage |
-| Filas PickPack | `/orders/pickpack` | getPickPackCarts, addPickPackOrdersToCart |
-| Devoluções | `/returns` | getOrderReturns, setOrderReturnStatus |
-| Faturas | `/invoices` | getInvoices |
-| Envios | `/shipments` | getCouriersList, getOrderPackages |
-| Produtos | `/inventory/products` | getInventoryProductsList, updateInventoryProductsStock |
-| Armazéns | `/inventory/warehouses` | getInventoryWarehouses, getInventoryWarehouseZones |
-| Documentos | `/inventory/documents` | getInventoryDocuments, setInventoryDocumentStatusConfirmed |
-| Pedidos de Compra | `/inventory/purchase-orders` | getInventoryPurchaseOrders |
-| Transferências | `/inventory/transfers` | getInventoryTransfers |
-| CRM | `/crm` | getCrmClients |
-| Base Connect | `/connect` | getConnectIntegrations |
-| Lojas Externas | `/external` | getExternalStoragesList |
-| Relatórios | `/reports` | getOrders (agregados) |
-| Configurações | `/settings` | — |
+| Endpoint | URL |
+|---|---|
+| Feed | https://fourmc-market-api.onrender.com/api/base-antigravity/ml/feed |
+| Pedidos | https://fourmc-market-api.onrender.com/api/base-antigravity/ml/orders |
+| Token | https://fourmc-market-api.onrender.com/api/base-antigravity/ml/token |
 
-## Instalação
+Sync on-demand → grava no DB → UI lê o DB. Detalhes: `docs/DATA_SOURCE_ML_FEED.md`.
+
+## Roadmap curto
+
+1. Sprint 1 — Feed ML + cache (núcleo)
+2. Sprint 2 — Kanban
+3. Sprint 3 — Pick & pack
+4. Sprint 4 — Etiquetas ZPL
+
+## Como rodar (API operacional)
 
 ```bash
-# 1. Instalar dependências
-npm install
-
-# 2. Iniciar em desenvolvimento
-npm run dev
-
-# 3. Acessar
-# http://localhost:3000
+cd apps/api
+# configurar ML_FEED_* no .env
+uvicorn src.main:app --reload --port 8000
+# abrir http://localhost:8000/app
+# botão: Atualizar feed Mercado Livre
 ```
 
-## Autenticação
+## Molde UI (legado KIRO / apps/web)
 
-Na tela de login, insira o token da API BaseLinker.  
-Gere o token em: **BaseLinker → Conta → API**
-
-O token é validado contra `getOrderStatusList` e armazenado em `localStorage`.  
-Nunca sai do seu navegador.
-
-## Rate Limiting
-
-O SDK (`src/lib/baselinker/client.ts`) inclui uma fila interna que respeita o limite de 100 req/min da API BaseLinker automaticamente.
+O client BaseLinker em frontends legados serve de **referência de telas e fluxos**.  
+Autenticação por token BaseLinker e rate-limit 100 req/min aplicam-se **só** a esse molde — não ao pipeline ML→SQLite.
 
 ## Heurísticas de Nielsen aplicadas
 
-1. **Visibilidade do status** — KPIs em tempo real, indicadores de loading/sync
-2. **Correspondência com o mundo real** — termos de e-commerce em PT-BR
-3. **Controle e liberdade** — ações destrutivas pedem confirmação, cancelar sempre disponível
-4. **Consistência e padrões** — sidebar fixa, mesmo padrão de tabelas em todos os módulos
-5. **Prevenção de erros** — validação de token na entrada, required fields
-6. **Reconhecimento em vez de lembrança** — filtros visíveis, status coloridos, breadcrumbs
-7. **Flexibilidade** — sidebar colapsável, dark/light mode, bulk actions
-8. **Estética minimalista** — sem informação desnecessária, hierarquia visual clara
-9. **Diagnóstico de erros** — mensagens de erro específicas via toast
-10. **Ajuda e documentação** — tooltips em ícones, links para a doc da API
+1. Visibilidade do status — última sync, contagens no DB  
+2. Correspondência com o mundo real — termos de e-commerce em PT-BR  
+3. Controle e liberdade — sync manual, confirmações  
+4. Consistência — padrões de tabela/sidebar do molde  
+5. Prevenção de erros — ML read-only neste fluxo  
+6–10. Reconhecimento, flexibilidade, estética clara, erros explícitos, ajuda contextual  

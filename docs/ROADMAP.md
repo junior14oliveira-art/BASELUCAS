@@ -1,84 +1,62 @@
-# Roadmap Técnico do Projeto: Plataforma SaaS Omnichannel AI (BaseLinker Evolution)
+# Roadmap: BASE ANTIGRAVITY (jrdev1 / 4M&C)
 
-Este documento detalha o planejamento por Fases, entregáveis, status de execução e critérios de aceite para a plataforma.
+**Produto:** nosso hub estilo BaseLinker (pedidos, catálogo, expedição, financeiro local).  
+**Molde:** UI/UX inspirada no BaseLinker.  
+**Dados:** Mercado Livre via API 4MC read-only + SQLite local (`omnichannel_real.db`).
 
----
-
-## 🎯 Visão do Produto
-
-Entregar uma plataforma SaaS Omnichannel de gestão de e-commerce enterprise inspirada no BaseLinker, integrada com Bling ERP, Mercado Livre, Shopee, Amazon, Magalu, WooCommerce, Shopify, Loja Integrada, Correios, Kangu, Melhor Envio, WhatsApp e NF-e/NFC-e, com interface Material Design 3 e 9 Agentes de IA autônomos.
+Skill: `.agents/skills/omnichannel-hub/SKILL.md` · Dados: `docs/DATA_SOURCE_ML_FEED.md` · API oficial ML: `docs/MERCADOLIVRE_API_STUDY.md` · Arquitetura: `docs/ARCHITECTURE.md` · Estudo BL (molde): `docs/BASELINKER_API_STUDY.md`
 
 ---
 
-## 🏁 Fases de Desenvolvimento
+## Quadro oficial de fases (fonte da verdade)
+
+| Fase | Entrega | Status |
+|---|---|---|
+| **1 — APIs e Infra** | FastAPI + Next.js (KIRO) + bridge API ML 4MC | 🟢 **CONCLUÍDO** |
+| **2 — Conexão do Feed** | Sync `/ml/feed` + `/ml/orders` → SQLite → **Guia Pedidos → Lista de pedidos** em `/app` | 🟡 **QUASE FEITO** — lista + sync na UI; vazio honesto se upstream 0; falta só pedidos reais no bridge para “encher” a lista |
+| **3 — Bipagem Pick & Pack** | Scanner USB no galpão | 🔴 **PENDENTE** — não iniciar agora |
+| **4 — Impressão ZPL Direct** | Envio direto Zebra/Elgin | 🔴 **PENDENTE** — não iniciar agora |
 
 ```mermaid
 timeline
-    title Roadmap de Desenvolvimento
-    Fase 1 : Infraestrutura Core & Monorepo : Setup Docker Compose, Auth OAuth2/JWT Multi-tenant, FastAPI DDD Setup, Next.js MD3 Layout
-    Fase 2 : Módulo de Produtos & Kits : Cadastro de SKUs, Variações, Kits/Bundles com Baixa Atômica, Depósitos Múltiplos
-    Fase 3 : Gestão de Anúncios por Marketplace : Listagem, Gestão de Anúncios ML/Shopee/Amazon, Categorias De-Para, Modelos de Frete
-    Fase 4 : Pedidos & Status Workflows : Webhook Ingestion Engine, ImportAgent, Order Hub estilo Base.com, Ações Automáticas
-    Fase 5 : Integração ERP Bling : Sincronismo Bidirecional Bling v3, ERPAgent, Conciliação de Estoque e Preços
-    Fase 6 : Emissão Fiscal NF-e/NFC-e : FiscalAgent, Protocolo SEFAZ, PDF DANFE/XML no S3, Tratamento de Erros
-    Fase 7 : Logística & Impressão Remota : ShippingAgent, Cotação de Frete (Correios/Kangu/Melhor Envio), Daemon Base.printer
-    Fase 8 : WhatsApp & CRM : NotificationAgent, Evolution/Cloud API, Funil de Leads, Automações de Pos-Venda
-    Fase 9 : Financeiro & DRE por Canal : FinancialAgent, Taxas de Marketplace, Fluxo de Caixa, DRE Simplificado
-    Fase 10 : Agentes de IA & AssistantAgent : AssistantAgent Side Sheet em linguagem natural, ReportAgent, Modos Preditivos
+    title BASE ANTIGRAVITY — Fases 1–4
+    Fase 1 : APIs e Infra : FastAPI + Next + ML 4MC
+    Fase 2 : Conexao do Feed : Sync → SQLite → Lista Pedidos
+    Fase 3 : Pick and Pack : Scanner USB galpao
+    Fase 4 : ZPL Direct : Zebra / Elgin
 ```
 
----
+### Critérios de aceite — Fase 2
 
-## 📊 Status das Fases
+- [x] URLs `ML_FEED_*` + `MLFeedSyncService` + SQLite
+- [x] `POST /api/v1/orders/sync-now` e botão na UI `/app`
+- [x] GETs de pedidos/dashboard **não** batem no 4MC a cada load
+- [x] Guia Pedidos (molde BaseLinker) com **Lista de pedidos** ligada ao cache local
+- [ ] Bridge 4MC com pedidos reais na conta (`total_orders_paid` / `paging.total` > 0) — **depende do upstream**; zero no bridge = lista vazia honesta + sync ok
 
-### 🟢 FASE 1: Infraestrutura Core, Monorepo & Auth (Em Andamento / Concluída)
-- [x] Docker Compose com PostgreSQL 16, Redis 7 e RabbitMQ 3.13.
-- [x] Estrutura Monorepo (`apps/web` e `apps/api`).
-- [x] Arquitetura Backend FastAPI com DDD (Domain, Application, Infrastructure, Presentation).
-- [x] Arquitetura Frontend Next.js 14 com Material Design 3 (`@mui/material`).
-- [x] Autenticação OAuth2 + JWT com isolamento Multi-tenant e 2FA.
+### Módulos UI (molde) — estado honesto
 
-### 🟡 FASE 2: Produtos, Inventário & Kits (Em Progresso)
-- [x] Modelos de dados para Produtos, Variações, SKUs e Categorias.
-- [x] Motor de Kits & Bundles com controle de componentes.
-- [x] Controle de Estoque Multi-depósito com trava atômica em Redis (`SETNX`).
-
-### 🟡 FASE 3: Gestão de Anúncios por Marketplace (Base.com Spec)
-- [x] Sub-módulo Mercado Livre / Shopee / Amazon (Listagem, Gestão de Anúncios, De-Para Categorias).
-- [x] Tabela de Tamanhos, Modelos de Anúncio e Central de Promoções.
-
-### 🟡 FASE 4: Pedidos, Status Workflows & Webhooks
-- [x] Webhook Ingestion Engine & `ImportAgent`.
-- [x] Interface de Pedidos com Sidebar de Status de Separação (Estilo Base.com).
-- [x] Triggers de Ações Automáticas "SE [Evento] ENTÃO [Ação]".
-
-### 🟡 FASE 5: Integração Bling ERP & Multi-Contas
-- [x] `ERPAgent` para integração Bling API v3.
-- [x] Árvore de Topologia Visual de Integrações no Frontend.
-
-### 🟡 FASE 6: Fiscal & NF-e (SEFAZ)
-- [x] `FiscalAgent` para validação de regras fiscais e emissão.
-- [x] Download em lote de pacotes ZIP com XML/PDF.
-
-### 🟡 FASE 7: Logística & Daemon de Impressão Remota (`Base.printer`)
-- [x] `ShippingAgent` para cotação e geração de etiquetas térmicas ZPL/PDF.
-- [x] Especificação do daemon de impressão local.
-
-### 🟡 FASE 8: WhatsApp Cloud / Evolution API & CRM
-- [x] `NotificationAgent` para automação de mensagens de rastreio.
-- [x] Funil de CRM e Gestão de Leads.
-
-### 🟡 FASE 9: Financeiro & DRE por Canal
-- [x] `FinancialAgent` para conciliação de taxas de marketplace e frete.
-
-### 🟡 FASE 10: Agentes de IA & Executivo Conversacional
-- [x] `AssistantAgent` integrado no Side Sheet MD3 para perguntas em linguagem natural.
-- [x] `ReportAgent` para relatórios preditivos de demanda.
+| Módulo | O que é real | O que é placeholder |
+|---|---|---|
+| **Pedidos** | Lista + status + clientes derivados + CSV + sync | Faturas/NF, devoluções, e-mail/SMS, transferências, print |
+| **Produtos** | Lista SQLite + inventário resumido + CSV + sync | Ações automáticas, import |
+| **Financeiro** | **Financeiro detalhado** = relatório local (totais, status, dias, tabela) a partir de `RealOrderDB` | Bling/SEFAZ/conciliação — **não inventar** |
 
 ---
 
-## 📌 Critérios de Aceite Globais
+## Visão longa (omnichannel)
 
-1. **Desempenho**: Tempo de resposta de API $< 100\text{ms}$ para rotas de leitura e sincronização de estoque $< 1\text{s}$ em todos os canais.
-2. **Segurança**: Testes OWASP Top 10 aprovados e isolamento estrito por `tenant_id`.
-3. **Usabilidade**: 100% das telas em conformidade com as 10 Heurísticas de Nielsen e Material Design 3.
+Fases aspiracionais depois da 4: multi-canal, fiscal (Bling/SEFAZ), WhatsApp/CRM, financeiro ERP, AssistantAgent com LLM.  
+**Não** marcar como concluídas.
+
+Detalhe de paridade de molde UI: `docs/PIPELINE_PROMPTS_ROADMAP.md` — útil para UX, **não** redefine a fonte de dados.
+
+---
+
+## O que não fazer no roadmap curto
+
+- Tratar BaseLinker API como produção.
+- Escrever estoque/preço no ML sem aprovação.
+- Iniciar Fase 3 (pick&pack) ou Fase 4 (ZPL) antes da Fase 2 estável.
+- Inventar dados financeiros/fiscais (Bling/SEFAZ) no relatório.
+- Polling contínuo do feed (cache + sync explícito).

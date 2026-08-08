@@ -1,256 +1,383 @@
-# Estudo da API Mercado Livre × Projeto Omnichannel
+# Estudo: API oficial Mercado Livre (MLB)
 
-> Gerado em **07/08/2026** · Fontes oficiais + código em `apps/api` / `apps/web`.  
-> Objetivo: orientar o caminho **ML nativo** (sem depender do BaseLinker) para funções de vendedor.
+> Gerado em **07/08/2026** a partir do portal [developers.mercadolivre.com.br](https://developers.mercadolivre.com.br/pt_br/api-docs).  
+> Escopo: **Marketplace vendedor Brasil (MLB)** — o que a API oficial oferece e como isso se encaixa no BASE ANTIGRAVITY.
+
+**Documentos irmãos**
+
+| Doc | Papel |
+|---|---|
+| `docs/DATA_SOURCE_ML_FEED.md` | Pipeline **produção hoje**: bridge 4MC → SQLite (READ-ONLY) |
+| `docs/BASELINKER_API_STUDY.md` | Molde UI/Kanban (não é fonte de vendas) |
+| `docs/ARCHITECTURE.md` / `docs/ROADMAP.md` | Arquitetura e sprints |
 
 ---
 
-## 1. Fontes oficiais (estude nesta ordem)
+## 1. Duas camadas (não confundir)
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  API OFICIAL  https://api.mercadolibre.com                 │
+│  OAuth próprio · webhooks · escrita · etiquetas · claims   │
+│  Client: mercadolivre_client.py  (ML_READ_ONLY=true)       │
+└──────────────────────────▲──────────────────────────────────┘
+                           │ (hoje: token + GETs via 4MC)
+┌──────────────────────────┴──────────────────────────────────┐
+│  BRIDGE 4MC  …/api/base-antigravity/ml/*                    │
+│  Só GET whitelist · conta PORTALDAINFORMTICA                │
+│  Client: ml_feed_client.py → sync → SQLite                  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+| Camada | Uso no produto agora |
+|---|---|
+| **4MC** | Fonte operacional de pedidos/itens/Q&A/claims/msgs (leitura) |
+| **API oficial** | Código OAuth + client nativo prontos; **escrita bloqueada** até homologação (`ML_READ_ONLY=true`) |
+| **BaseLinker** | Só nomes de filas / UX — zero vendas |
+
+A bridge 4MC **proxifica** recursos oficiais (`/orders`, `/shipments`, `/items`…). O estudo abaixo é da API **oficial**; a coluna “4MC” mostra o path equivalente no feed.
+
+---
+
+## 2. Fontes oficiais (ordem de leitura)
 
 | # | Tema | URL |
 |---|---|---|
 | 1 | Portal API Docs | https://developers.mercadolivre.com.br/pt_br/api-docs |
-| 2 | OAuth / Autorização (PKCE) | https://developers.mercadolivre.com.br/pt_br/autenticacao-e-autorizacao |
-| 3 | Publicação de produtos | https://developers.mercadolivre.com.br/pt_br/publicacao-de-produtos |
+| 2 | Autenticação e Autorização (OAuth + PKCE) | https://developers.mercadolivre.com.br/pt_br/autenticacao-e-autorizacao |
+| 3 | Obtenção do Access Token | https://developers.mercadolivre.com.br/pt_br/obtencao-do-access-token |
 | 4 | Pedidos e opiniões | https://developers.mercadolivre.com.br/pt_br/pedidos-e-opinioes |
-| 5 | Mercado Envios 2 | https://developers.mercadolivre.com.br/pt_br/mercado-envios-2 |
-| 6 | Notificações (webhooks) | https://developers.mercadolivre.com.br/pt_br/notificacoes |
-| 7 | DevCenter (criar app) | https://developers.mercadolivre.com.br/devcenter |
-| 8 | Base API | `https://api.mercadolibre.com` |
-| 9 | Auth BR | `https://auth.mercadolivre.com.br` |
+| 5 | Perguntas e respostas | https://developers.mercadolivre.com.br/pt_br/perguntas-e-respostas |
+| 6 | Mercado Envios 2 | https://developers.mercadolivre.com.br/pt_br/mercado-envios-2 |
+| 7 | Notificações (webhooks) | https://developers.mercadolivre.com.br/pt_br/notificacoes |
+| 8 | Mensageria pós-venda | https://developers.mercadolivre.com.br/pt_br/o-que-e-mensageria |
+| 9 | Boas práticas / anti-sanção | https://developers.mercadolivre.com.br/pt_br/boas-praticas-para-usar-a-plataforma |
+| 10 | DevCenter (criar app) | https://developers.mercadolivre.com.br/devcenter |
 
-**Unidade de negócio:** Marketplace (vendedor MLB).  
-**Auth:** OAuth 2.0 Authorization Code + **PKCE (S256)** + `refresh_token` (uso único).
+**Hosts**
 
----
-
-## 2. Regras críticas da documentação (não violar)
-
-1. **Access token** dura **6 horas** → renovar com refresh **só quando expirar**.
-2. **Refresh token** é **uso único** → sempre persistir o novo `refresh_token` (o projeto já faz isso em `ml_sync_service.build_client`).
-3. **redirect_uri** deve ser **idêntica** à cadastrada no DevCenter (sem query variável).
-4. Login do grant deve ser conta **administrador**, não colaborador (`invalid_operator_user_id`).
-5. Header: `Authorization: Bearer APP_USR-...` (nunca token no browser — tokens ficam no FastAPI).
-6. Pedidos/envios modernos: header **`x-format-new: true`** em `/shipments` (estrutura nova).
-7. **Fulfillment (Full):** vendedor **não imprime etiqueta de venda** — só etiqueta de estoque para depósito ML.
-8. Rate limit: ML responde **429**; o client já tem semáforo + retry. Evitar polling agressivo — preferir **webhooks**.
-9. Mensagens automáticas repetitivas podem gerar **penalidade** na conta.
-10. App sem uso por **4 meses** pode invalidar o grant.
+| Uso | URL |
+|---|---|
+| API | `https://api.mercadolibre.com` |
+| Auth BR | `https://auth.mercadolivre.com.br` |
+| Pagamentos (detalhe) | `https://api.mercadopago.com` (recurso payments) |
 
 ---
 
-## 3. Mapa: módulos ML oficiais × nosso código
+## 3. OAuth 2.0 (oficial) — regras que não se negociam
 
-### Legenda
-- ✅ Implementado e usável  
-- 🟡 Parcial (API/client existe, UI ou fluxo incompleto)  
-- ❌ Não implementado  
+Fluxo: **Authorization Code (server-side)** + **PKCE S256** (quando habilitado no app) + `refresh_token`.
 
-| Módulo ML (doc) | Endpoints típicos | Status no projeto | Arquivos |
+### 3.1 Grant
+
+1. Redirect do vendedor (admin da conta, **não** colaborador):
+
+```
+https://auth.mercadolivre.com.br/authorization
+  ?response_type=code
+  &client_id=$APP_ID
+  &redirect_uri=$REDIRECT_URI   # idêntica ao DevCenter, sem query variável
+  &state=$CSRF
+  &code_challenge=$CHALLENGE
+  &code_challenge_method=S256
+```
+
+2. Troca `code` → token:
+
+```http
+POST https://api.mercadolibre.com/oauth/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=authorization_code
+&client_id=…
+&client_secret=…
+&code=…
+&redirect_uri=…
+&code_verifier=…   # se PKCE
+```
+
+Resposta típica:
+
+```json
+{
+  "access_token": "APP_USR-…",
+  "token_type": "bearer",
+  "expires_in": 21600,
+  "scope": "offline_access read write",
+  "user_id": 1234567,
+  "refresh_token": "TG-…"
+}
+```
+
+### 3.2 Refresh
+
+- `access_token` vale **6 horas** (`expires_in: 21600`).
+- `refresh_token` é **uso único** — cada refresh devolve um **novo** refresh; persistir atomicamente o último.
+- Renovar **só quando expirar** (não a cada request).
+- Refresh pode durar até ~**6 meses**; depois: novo grant completo.
+
+### 3.3 Header em toda chamada privada
+
+```http
+Authorization: Bearer APP_USR-…
+```
+
+Nunca expor token no browser — só no backend (`mercadolivre_client.py` / bridge).
+
+### 3.4 Invalidação antecipada do token
+
+- Troca de senha do vendedor  
+- Troca de Client Secret do app  
+- Revogação de permissões  
+- **4 meses sem nenhuma chamada** à API  
+- Login com operador → `invalid_operator_user_id`
+
+### 3.5 Erros comuns OAuth
+
+| Código | Significado |
+|---|---|
+| `invalid_client` | APP ID / secret errados |
+| `invalid_grant` | code/refresh usado, expirado ou `redirect_uri` diferente |
+| `invalid_scope` | scopes: `read`, `write`, `offline_access` |
+| `local_rate_limited` (429) | backoff |
+| `unauthorized_application` | app bloqueado |
+
+**No projeto:** PKCE + exchange + refresh em `mercadolivre_client.py`; bridge usa `/token` 4MC (metadados — strip de segredos).
+
+---
+
+## 4. Recursos oficiais críticos para o hub
+
+### 4.1 Pedidos (`/orders`)
+
+| Recurso oficial | Método | 4MC equivalente | Notas |
 |---|---|---|---|
-| OAuth + PKCE + refresh | `/oauth/token`, auth.mercadolivre.com.br | ✅ | `mercadolivre_client.py`, `routers/mercadolivre.py` `/auth/*` |
-| Contas multi-seller | `/users/me` | ✅ | `MLAccountDB`, `/ml/accounts` |
-| Categorias + atributos + predict | `/categories`, `/category_predictor` | ✅ | client + `/ml/categories*` |
-| De-para categorias | (tabela local) | ✅ | `MLCategoryMapDB` |
-| Anúncios CRUD / preço / estoque | `/items`, `/users/{id}/items/search` + **scan** | ✅ | sync + listings API |
-| Pausar / ativar / fechar / bulk | `PUT /items/{id}` status | ✅ / 🟡 close parcial | router listings |
-| Descrição | `/items/{id}/description` | ✅ client / 🟡 UI | client |
-| Pedidos | `/orders/search`, `/orders/{id}` | ✅ sync → `MLOrderDB` + espelho `RealOrderDB` | `ml_sync_service.py` |
-| Envios + etiqueta PDF | `/shipments`, labels | 🟡 | get shipment + label no router |
-| Fulfillment stock | stock fulfillment | 🟡 | `get_fulfillment_stock` no client |
-| Perguntas Q&A | `/questions/search`, answer | ✅ | router questions |
-| Webhooks | POST notificação + processar | 🟡 | `/ml/webhooks*` (validar topics completos) |
-| Taxas (fees) | listing fees | ✅ | `/ml/fees/simulate` |
-| Visitas / métricas | visits | 🟡 | endpoint visits |
-| Promoções | seller promotions v2 | 🟡 | `get_item_promotions` só leitura |
-| Mensagens pós-venda | `/messages` | ❌ | — |
-| Claims / mediações | `/claims`, `/post-purchase` | ❌ | — |
-| Packs / carrinho | `pack_id` / packs | 🟡 campo em order | sem UI de pack |
-| Feedback / reputação | order feedback | ❌ | — |
-| Notas no pedido | order notes | ❌ | — |
-| User Products / stock multi-depósito | `/user-products/.../stock` + `x-version` | ❌ | estoque ainda via `/items` clássico |
-| Flex / Coleta / Places | shipping modes | ❌ | — |
-| Faturador / NF no ML | `/users/{id}/invoices/...` | ❌ | fiscal hoje é outro eixo |
-| Billing / liberação | billing / settlements | ❌ | — |
-| Moderação / qualidade anúncio | item health (parcial) | 🟡 | campo `health` no listing |
-| Variações / catálogo | variations, catalog_listing | 🟡 flags | publicação variações incompleta |
+| `/orders/search?seller=$ID` | GET | `/orders` | Paginação: oficial costuma `limit` ≤ 50; **4MC idem (máx. 50)** |
+| `/orders/search?seller=$ID&q=$ORDER_ID` | GET | `/order/:id` | Busca pontual |
+| `/orders/$ORDER_ID` | GET | `/order/:id` | Detalhe completo |
+| `/orders/$ORDER_ID/feedback` | GET/POST | — | Opiniões (escrita bloqueada) |
+| `/orders/$ORDER_ID/product` | GET | — | Atributos do produto na venda (ex. IMEI) |
 
----
+**Status de pedido (`order.status`)** — filtros oficiais:
 
-## 4. O que o projeto já faz bem (base sólida)
+| Status | Significado |
+|---|---|
+| `paid` | Pago (fluxo operacional principal) |
+| `confirmed` | Confirmado |
+| `payment_in_process` | Pagamento em processo |
+| `payment_required` | Aguardando pagamento |
+| `cancelled` | Cancelado |
+| `invalid` | Inválido |
 
-```
-apps/api/src/infrastructure/mercadolivre_client.py   (~440 linhas)
-apps/api/src/infrastructure/ml_sync_service.py        (sync → DB + RealOrderDB)
-apps/api/src/presentation/routers/mercadolivre.py     (~840 linhas, prefix /api/v1/ml)
-apps/web/src/lib/ml/client.ts                        (proxy seguro ao backend)
-apps/web/src/app/(app)/marketplaces/mercadolivre/     (UI conectar + anúncios)
-```
+**Tags frequentes:** `paid`, `not_paid`, `delivered`, `not_delivered`, `processed`, `not_processed`, `claim_opened`, `claim_closed`.
 
-Fluxo atual:
+**Campos úteis no JSON do pedido**
 
-```mermaid
-sequenceDiagram
-    participant UI as Next.js /marketplaces/ml
-    participant API as FastAPI /api/v1/ml
-    participant ML as api.mercadolibre.com
-    participant DB as SQLite/Postgres
+- Identidade: `id`, `date_created`, `date_closed`, `date_last_updated`, `currency_id`, `total_amount`
+- Itens: `order_items[]` → `item.id` (MLB…), `title`, `quantity`, `unit_price`, **`sale_fee`**, variações
+- Pagamentos: `payments[]` → status, `transaction_amount`, `total_paid_amount`, `marketplace_fee`, método
+- Envio: `shipping.id` → chave para `/shipments/{id}`; `shipping.status` / `substatus`
+- Comprador: `buyer` (nome/nick; e-mail/telefone frequentemente mascarados em produção)
+- Pack: `pack_id` (carrinho multi-item)
+- Feedback / mediations / tags
 
-    UI->>API: auth/url (PKCE)
-    API-->>UI: authorization_url
-    UI->>ML: login vendedor
-    ML->>API: callback ?code=
-    API->>ML: oauth/token
-    API->>DB: salva MLAccountDB + tokens
-    UI->>API: sync/all
-    API->>ML: scan items / orders / questions
-    API->>DB: MLListingDB, MLOrderDB, RealOrderDB
-    ML-->>API: webhooks (orders, items, questions...)
-    API->>DB: MLWebhookEventDB + reprocess
-```
+> **Importante:** status custom de Kanban (**“Novos pedidos”**, filas BaseLinker) **não existem na API ML**. São camada nossa (SQLite + import BL read-only).
 
----
+### 4.2 Envios (`/shipments`) — Mercado Envios 2
 
-## 5. Gap para “funções de painel” estilo BaseLinker **só no ML**
+| Recurso oficial | Método | 4MC | Notas |
+|---|---|---|---|
+| `/shipments/$ID` | GET | `/shipment/:id` | Preferir header **`x-format-new: true`** (estrutura nova) |
+| `/shipments/labels?shipment_ids=…` | GET | — (write/label futuro) | PDF/ZPL; **não alterar template** da etiqueta |
 
-BaseLinker multi-canal ≠ API ML. Abaixo é o gap **realista** usando só Mercado Livre + nosso hub interno.
+**Status de envio (`shipping.status`)** — principais:
 
-| Capacidade desejada | Via API ML? | Gap |
+`to_be_agreed` · `pending` · `handling` · `ready_to_ship` · `shipped` · `delivered` · `not_delivered` · `cancelled` · `closed` · `stale_ready_to_ship` · `stale_shipped` · …
+
+**Substatus operacionais** (amostra): `ready_to_print`, `printed`, `invoice_pending`, `waiting_for_label_generation`, `out_for_delivery`, `receiver_absent`, `bad_address`, `returned`, …
+
+**Modos logísticos (impacto no produto)**
+
+| Modo | Etiqueta de venda? | Ação no hub |
 |---|---|---|
-| Conectar conta / multi-conta | Sim | Quase pronto ✅ |
-| Gerir anúncios (preço/estoque/pause) | Sim | UI avançada (variações, descrição, fotos) |
-| Hub de pedidos unificado + status custom | Parcial | Status custom é **nosso** (não existe no ML como no BL) |
-| PickPack / filas | Não nativo | Construir em cima de `MLOrderDB` |
-| Etiqueta Mercado Envios | Sim | Completar UI + `x-format-new` + modos Flex/Full |
-| Full (fulfillment) | Sim (limitado) | Stock inbound + sem label de venda |
-| Perguntas | Sim | ✅ |
-| Chat / mensagens | Sim | ❌ implementar |
-| Reclamações (claims) | Sim | ❌ implementar |
-| NF-e Brasil | Faturador ML + SEFAZ | ❌ eixo fiscal separado |
-| WMS / PO / transferências | Não | Produto próprio (não é ML) |
-| Automações SE→ENTÃO | Não | Motor interno + triggers webhook |
-| Shopee/Amazon/etc. | Não | Outras APIs |
+| `drop_off` / `xd_drop_off` / ME2 clássico | Sim (PDF/ZPL) | Sprint ZPL |
+| Flex / self_service | Sim (regras Flex) | Fluxo próprio |
+| **Fulfillment (Full)** | **Não** imprime etiqueta de venda | Só estoque/inbound Full |
 
-**Estimativa honesta:**  
-- Painel ML operacional (anúncios + pedidos + envios + Q&A + claims + msgs): **~40–50% feito**.  
-- “Clone BaseLinker completo” via ML: **impossível só com ML** — falta OMS próprio + outros canais.
+Dados ricos no shipment: `receiver_address` (rua, cidade, UF, CEP, telefone), tracking, `shipping_option`, custos, `status_history`.
+
+### 4.3 Anúncios (`/items`)
+
+| Recurso oficial | Método | 4MC | Uso |
+|---|---|---|---|
+| `/users/$ID/items/search` | GET | `/items` | Lista / scan |
+| `/items/$ITEM_ID` | GET | `/item/:id` | Detalhe |
+| `/items?ids=…` | GET | — | Batch |
+| `POST /items` | POST | — | Criar (bloqueado) |
+| `PUT /items/$ID` | PUT | — | Preço/estoque/status (bloqueado) |
+| `/items/$ID/description` | GET/PUT | — | Descrição |
+| Categorias / predict | GET | — | Publicação |
+
+Estoque moderno: **User Products** (`/user-products/.../stock` + header `x-version`) — notificado via topic `stock_locations`. Nosso client ainda usa modelo clássico `/items` em vários pontos.
+
+### 4.4 Perguntas
+
+| Oficial | 4MC |
+|---|---|
+| `GET /questions/search` · `/my/received_questions/search` · `/questions/$ID` | `/questions` |
+| `POST /answers` | — (write) |
+
+Status: `UNANSWERED`, `ANSWERED`, `BANNED`, `CLOSED_UNANSWERED`, `DELETED`, `DISABLED`, `UNDER_REVIEW`.  
+Doc recomenda `api_version=4` para estrutura nova (contato do comprador sob regras de privacidade).
+
+### 4.5 Mensagens pós-venda
+
+- Comunicação **após a venda**, tipicamente por **pack**.
+- Vendedor inicia contato escolhendo **motivo** (não spam).
+- **Proibido** mensagens automáticas repetitivas / templates de “recebemos sua compra” — risco de moderação (boas práticas oficiais).
+- 4MC: `GET /messages/:orderId` (read-only hoje).
+
+### 4.6 Claims / mediações
+
+- Topic webhook: `claims`.
+- 4MC: `GET /claims`.
+- Escrita/resposta: só após `ML_READ_ONLY=false` + homologação.
+
+### 4.7 Feedback
+
+- `GET/POST /orders/$ID/feedback`, `PUT /feedback/$ID`, reply.
+- Não é o mesmo que status de Kanban interno.
 
 ---
 
-## 6. Endpoints prioritários para estudar / implementar
+## 5. Notificações (webhooks) — preferir a polling
 
-### P0 — Operação diária (próximos sprints)
-| Recurso | Método | Nota |
+Callback no DevCenter → `POST` na URL pública. Responder **HTTP 200 em ≤ 500 ms**; processar a fila em background. Retries: até ~5 tentativas em 1 h (doc atual).
+
+Payload típico:
+
+```json
+{
+  "_id": "…",
+  "resource": "/orders/219516086",
+  "user_id": 468424240,
+  "topic": "orders_v2",
+  "application_id": 123,
+  "attempts": 1,
+  "sent": "…",
+  "received": "…"
+}
+```
+
+Depois: `GET` no `resource` com o token do `user_id`.
+
+### Topics relevantes ao hub (Marketplace)
+
+| Topic | Quando | GET seguinte |
 |---|---|---|
-| `/orders/search` | GET | Já usado; filtrar `order.status`, date |
-| `/orders/{id}` | GET | Já usado |
-| `/shipments/{id}` | GET | Header `x-format-new: true` |
-| Labels shipment | GET | Já há PDF; tratar Full vs drop_off |
-| `/items/{id}` | PUT | Variações, shipping, pictures |
-| Notifications topics | webhook | `orders_v2`, `shipments`, `items`, `questions`, `messages`, `claims`, `stock_*` |
+| **`orders_v2`** | Criação/alteração de venda confirmada (**recomendado**) | `/orders/{id}` |
+| **`shipments`** | Mudança logística | `/shipments/{id}` (+ `x-format-new`) |
+| **`items`** | Mudança no anúncio | `/items/{id}` |
+| **`questions`** | Pergunta criada/respondida | `/questions/{id}` |
+| **`payments`** | Pagamento criado/alterado | Mercado Pago `/v1/payments/{id}` |
+| **`messages`** | Mensagem pós-venda | API messages / pack |
+| **`claims`** | Reclamação | claims API |
+| `orders_feedback` | Feedback | feedback resource |
+| `invoices` | NF automática Full (BR) | invoices |
+| `stock_locations` | Estoque user-product | `/user-products/.../stock` |
+| `stock fulfillment` / FBM | Operações Full | `/stock/fulfillment/operations/...` |
+| `items_prices` | Preço | `/items/{id}/prices` |
+| `flex-handshakes` | Transferência Flex | shipment Flex |
+| promoções / catalog | Campanhas / catálogo | conforme doc |
 
-### P1 — Pós-venda
-| Recurso | Uso |
-|---|---|
-| Messages API | Chat comprador–vendedor |
-| Claims / mediations | Contestações |
-| Order feedback | Avaliação |
-| Packs | Pedidos de carrinho |
+Missed feeds: `GET /missed_feeds?app_id=…&topic=…`.
 
-### P2 — Estoque moderno & Full
-| Recurso | Uso |
-|---|---|
-| User Products stock | Multi-depósito + `x-version` optimistic lock |
-| Fulfillment stock / inbound | Full |
-| Shipping options / Flex | Cotação e modos |
-
-### P3 — Monetização & compliance
-| Recurso | Uso |
-|---|---|
-| Seller promotions v2 | Campanhas |
-| Billing / settlements | Financeiro canal |
-| Invoices (faturador) | NF no fluxo ML |
-| Moderação / quality | Saúde do anúncio |
+**No projeto:** router `/api/v1/ml/webhooks*` existe de forma parcial; pipeline diário atual é **sync explícito 4MC → SQLite** (polling controlado + backoff 429).
 
 ---
 
-## 7. Pipeline de prompts — ML nativo (6 sprints)
+## 6. Rate limit e boas práticas (oficial)
 
-### ▶ ML-S1 — Endurecer OAuth, webhooks e `x-format-new`
+1. Tratar **429** com backoff / `Retry-After` (já no `ml_feed_client` e semáforo no client nativo).
+2. Preferir **webhooks** a varrer 8k+ pedidos em loop.
+3. Não fazer web crawling — só API.
+4. Não clonar anúncios/imagens em massa.
+5. Não alterar template de etiqueta ML.
+6. Não enviar mensagens automáticas repetitivas.
+7. Ações massivas mal feitas → **sanção na conta do vendedor**.
 
-```
-Estude https://developers.mercadolivre.com.br/pt_br/autenticacao-e-autorizacao
-e https://developers.mercadolivre.com.br/pt_br/notificacoes
+---
 
-No projeto (apps/api):
-1. Garantir PKCE S256, state CSRF, persistência atômica do refresh_token (já parcialmente feito — revisar race conditions no refresh_lock).
-2. Validar todos os topics de webhook: orders_v2, shipments, items, questions, messages, claims, payments, stock_locations, stock_fulfillment.
-3. Em get_shipment / labels, enviar header x-format-new: true conforme doc Mercado Envios 2.
-4. Documentar no .env.example: ML_CLIENT_ID, ML_CLIENT_SECRET, ML_REDIRECT_URI, ML_WEBHOOK_SECRET, ML_SITE_ID=MLB.
-5. Testar com usuário de teste do DevCenter.
+## 7. Mapa 4MC ↔ oficial (produção atual)
 
-Não alterar UI neste sprint.
-```
+| 4MC (GET) | Oficial aproximado | Já usamos no sync |
+|---|---|---|
+| `/feed` | agregação custom | resumo dashboard |
+| `/orders` | `/orders/search` | lista → `RealOrderDB` |
+| `/order/:id` | `/orders/{id}` | enrich fees/buyer |
+| `/shipment/:id` | `/shipments/{id}` | endereço/telefone |
+| `/item/:id` · `/items` | `/items` · search | catálogo |
+| `/questions` | `/questions/search` | fila Q&A |
+| `/claims` | claims API | read |
+| `/messages/:orderId` | messages API | read |
+| `/token` | OAuth tokens (servidor 4MC) | metadados only |
 
-### ▶ ML-S2 — Order Hub ML (UI + status interno)
+Limites observados no bridge: **orders `limit` ≤ 50**; items preferir `limit` ~20.
 
-```
-Usar MLOrderDB + RealOrderDB como fonte.
-Criar/aprimorar página apps/web/.../marketplaces/mercadolivre/orders (ou unificar /orders com filtro channel=ML).
+---
 
-Features:
-- Listar pedidos ML com status ML + status interno (nosso workflow estilo Base).
-- Detalhe: itens, pagamento, buyer, shipment_id, pack_id.
-- Ações: sync refresh, abrir etiqueta (se não for fulfillment), marcar status interno.
-- Webhook orders_v2 deve atualizar a linha em <5s após process.
+## 8. O que o código do monorepo já cobre
 
-Espelhar pedidos ML em RealOrderDB (ml_sync_service já faz — validar campos).
-```
+| Capacidade oficial | Status | Onde |
+|---|---|---|
+| OAuth PKCE + refresh | ✅ | `mercadolivre_client.py`, `/api/v1/ml/auth/*` |
+| Guard READ-ONLY writes | ✅ | `ML_READ_ONLY` + `allow_write` |
+| Sync pedidos/itens via 4MC | ✅ | `ml_feed_client.py`, `sync_service.py` |
+| Search/get order nativo | ✅ client | sync produção usa 4MC |
+| Shipment + labels PDF | 🟡 | get shipment; labels no client |
+| Q&A search + answer | ✅ / 🔒 | answer bloqueado por READ-ONLY |
+| Webhooks | 🟡 | receber + reprocess parcial |
+| Messages / claims write | ❌ / 🔒 | só GET via 4MC |
+| User-products stock | ❌ | — |
+| Flex / Full inbound | ❌ / 🟡 | fulfillment stock GET parcial |
+| Faturador / invoices BR | ❌ | eixo fiscal separado |
 
-### ▶ ML-S3 — Envios completos (drop_off, Flex, Full)
+Estimativa honesta (painel vendedor ML): **~40–50%** do que a API permite; **100%** do fluxo de leitura operacional depende do feed 4MC + cache.
 
-```
-Doc: Mercado Envios 2.
-1. Detectar logistic_type / shipping_mode do shipment.
-2. Se fulfillment: NÃO oferecer "imprimir etiqueta de venda"; oferecer fluxo de estoque Full.
-3. Se drop_off / xd_drop_off / self_service: baixar label PDF e exibir tracking.
-4. UI stepper a partir do pedido ML.
-5. Expandir mercadolivre_client com helpers tipados para cada modo.
-```
+---
 
-### ▶ ML-S4 — Publicação avançada (variações, fotos, atributos obrigatórios)
+## 9. Implicações para o roadmap do hub
 
-```
-Doc: publicação de produtos.
-1. Fluxo criar anúncio: predict category → attributes obrigatórios → formulário dinâmico → POST /items.
-2. Upload de imagens (API pictures).
-3. Variações (size/color) quando a categoria exigir.
-4. Editar descrição (plain_text) na UI.
-5. Usar MLCategoryMapDB no de-para do catálogo interno.
-```
+| Sprint produto | Uso da API oficial |
+|---|---|
+| Feed → Pedidos (atual) | 4MC GET ≈ `/orders` + enrich `/shipments` |
+| Kanban | Status **internos** (BL mold); ML só `order.status` / shipping |
+| Pick & Pack | Dados shipment + itens; sem endpoint “pick” no ML |
+| ZPL Direct | `GET /shipments/labels` (oficial) — **só após** liberar write/label e respeitar Full vs ME2 |
+| Pós-venda | messages + claims (topics + APIs) com regras anti-spam |
+| Futuro nativo | Webhooks `orders_v2`/`shipments` substituem parte do poll 4MC |
 
-### ▶ ML-S5 — Mensagens + Claims
+---
 
-```
-Implementar no client + router + UI:
-- Listar/enviar messages por order/pack
-- Listar claims, responder, anexar
-Respeitar regras anti-spam da doc (sem mensagem automática repetitiva).
-Webhooks messages + claims.
-```
-
-### ▶ ML-S6 — User Products stock + Promoções + Fees no Order Hub
+## 10. Checklist de conformidade (estudo → implementação)
 
 ```
-1. Migrar update de estoque de PUT /items quantity para user-products stock (com x-version) onde aplicável.
-2. UI de promoções (seller-promotions v2) — ao menos listar/opt-in.
-3. No detalhe do pedido, mostrar sale_fee / net estimado.
-4. Relatório simples: visitas + conversão por anúncio.
+[x] OAuth: expires_in 6h, refresh único, redirect_uri estática, admin only
+[x] Header Authorization Bearer em recursos privados
+[x] order.status / shipping.status documentados
+[x] x-format-new em shipments (ME2)
+[x] Topics prioritários: orders_v2, shipments, items, questions, messages, claims
+[x] 429 + boas práticas (sem spam msg, sem alterar label template)
+[x] Mapa 4MC ↔ oficial
+[ ] Assinar webhooks em produção e ACK <500ms
+[ ] Labels ZPL só para modos não-fulfillment
+[ ] Migrar estoque para user-products onde aplicável
+[ ] Liberar ML_READ_ONLY=false só com homologação explícita
 ```
 
 ---
 
-## 8. Variáveis de ambiente
+## 11. Variáveis de ambiente (nativo)
 
 ```env
 ML_CLIENT_ID=
@@ -258,42 +385,12 @@ ML_CLIENT_SECRET=
 ML_REDIRECT_URI=http://localhost:8000/api/v1/ml/auth/callback
 ML_SITE_ID=MLB
 ML_WEBHOOK_SECRET=
+ML_READ_ONLY=true
+ML_FEED_BASE_URL=https://fourmc-market-api.onrender.com/api/base-antigravity/ml
 ```
 
-App no DevCenter: scopes `read` + `write` + `offline_access`.  
-URL de notificação: HTTPS público apontando para `POST /api/v1/ml/webhooks`.
+Scopes DevCenter: `read` + `write` + `offline_access` (write fica inerte enquanto `ML_READ_ONLY=true`).
 
 ---
 
-## 9. Checklist de estudo (para você / o agente)
-
-Ao ler a doc oficial, anote e traga para o código:
-
-```
-[ ] OAuth PKCE + refresh único
-[ ] Topics de notificação que o app vai assinar
-[ ] Diferença items clássicos vs user-products
-[ ] Modos de envio: drop_off, xd_drop_off, self_service, fulfillment
-[ ] Quando NÃO imprimir etiqueta
-[ ] Pack vs order
-[ ] Claims SLA e estados
-[ ] Regras de mensagens
-[ ] Faturador / invoice (BR)
-[ ] Limites 429 e boas práticas de sync (preferir webhook a poll)
-```
-
----
-
-## 10. Relação com o roadmap BaseLinker
-
-| Roadmap | Quando usar |
-|---|---|
-| `docs/PIPELINE_PROMPTS_ROADMAP.md` | Paridade UI/API **via BaseLinker** |
-| **Este arquivo** | Operação **nativa ML** (sem BL) |
-| `docs/ROADMAP.md` (SaaS) | Visão multi-canal + agentes (longo prazo) |
-
-Estratégia sugerida: **ML-S1→S3 primeiro** (ganho operacional no canal principal), em paralelo manter BL só como ponte se ainda precisar de outros canais.
-
----
-
-*Doc vivo — atualizar quando a API ML mudar (promoções v2, user-products, faturador).*
+*Doc vivo — atualizar quando o portal ML mudar (user-products, faturador, topics). Última revisão: 07/08/2026.*

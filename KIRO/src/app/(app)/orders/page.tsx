@@ -2,8 +2,7 @@
 
 import React, { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useOrders, useOrderStatuses } from "@/lib/hooks/use-bl-query";
-import { bl } from "@/lib/baselinker/client";
+import { useOrders, useOrderStatuses, useSyncOrdersNow } from "@/lib/hooks/use-bl-query";
 import { formatDate, formatCurrency, debounce } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,24 +20,54 @@ export default function OrdersPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<number | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [dateRange, setDateRange] = useState(30); // days
+  const [dateRange, setDateRange] = useState(365); // cache local — janela ampla
 
   const { data: orders = [], isLoading, isFetching, refetch } = useOrders({
     date_confirmed_from: Math.floor(Date.now() / 1000) - dateRange * 86400,
     status_id: statusFilter ?? undefined,
   });
   const { data: statuses = [] } = useOrderStatuses();
+  const syncMut = useSyncOrdersNow();
 
   const deleteMut = useMutation({
-    mutationFn: (ids: number[]) => bl.deleteOrders(ids),
-    onSuccess: () => { toast.success(`${selected.size} pedido(s) excluído(s)`); setSelected(new Set()); qc.invalidateQueries({ queryKey: ["orders"] }); },
-    onError: () => toast.error("Erro ao excluir pedidos"),
+    mutationFn: async (_ids: number[]) => {
+      throw new Error("Exclusão via BaseLinker desativada — use o painel local.");
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : "Erro ao excluir"),
   });
 
   const changeStatusMut = useMutation({
-    mutationFn: ({ ids, sid }: { ids: number[]; sid: number }) => bl.setOrderStatuses(ids, sid),
-    onSuccess: () => { toast.success("Status atualizado"); setSelected(new Set()); qc.invalidateQueries({ queryKey: ["orders"] }); },
+    mutationFn: async ({ ids, sid }: { ids: number[]; sid: number }) => {
+      const status = (statuses as BLOrderStatus[]).find((s) => s.id === sid);
+      await Promise.all(
+        ids.map((id) =>
+          fetch(`/api/v1/orders/${id}/change-status`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status_id: sid, status_name: status?.name || "Em Processamento" }),
+          }).then((r) => {
+            if (!r.ok) throw new Error(`Falha ao alterar #${id}`);
+          }),
+        ),
+      );
+    },
+    onSuccess: () => {
+      toast.success("Status atualizado no cache local");
+      setSelected(new Set());
+      qc.invalidateQueries({ queryKey: ["orders"] });
+    },
+    onError: () => toast.error("Erro ao atualizar status"),
   });
+
+  const handleSync = () => {
+    syncMut.mutate(undefined, {
+      onSuccess: (res) => {
+        toast.success(res.message || "Sync ML concluída");
+        refetch();
+      },
+      onError: (err) => toast.error(err instanceof Error ? err.message : "Falha no sync ML"),
+    });
+  };
 
   const debouncedSearch = React.useMemo(() => debounce((v: string) => setSearch(v), 300), []);
 
@@ -63,7 +92,9 @@ export default function OrdersPage() {
         <div>
           <h1 className="text-base font-semibold">Pedidos</h1>
           <p className="text-xs text-muted-foreground">
-            {isLoading ? "Carregando..." : `${filtered.length} de ${allOrders.length} pedidos — últimos ${dateRange} dias`}
+            {isLoading
+              ? "Carregando cache local (ML / 4M&C)…"
+              : `${filtered.length} de ${allOrders.length} pedidos — cache local`}
           </p>
         </div>
         <div className="ml-auto flex items-center gap-2 flex-wrap">
@@ -72,16 +103,24 @@ export default function OrdersPage() {
             onChange={(e) => setDateRange(Number(e.target.value))} aria-label="Período">
             <option value={7}>7 dias</option>
             <option value={30}>30 dias</option>
-            <option value={60}>60 dias</option>
             <option value={90}>90 dias</option>
+            <option value={365}>1 ano</option>
+            <option value={3650}>Todo o cache</option>
           </select>
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
             <Input placeholder="Buscar pedido, e-mail, nome..." className="pl-8 h-8 w-56 text-xs"
               onChange={(e) => debouncedSearch(e.target.value)} aria-label="Buscar pedidos" />
           </div>
-          <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching} aria-label="Recarregar">
-            <RefreshCw className={`h-3.5 w-3.5 ${isFetching ? "animate-spin" : ""}`} />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleSync}
+            disabled={syncMut.isPending || isFetching}
+            aria-label="Sincronizar feed Mercado Livre"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${syncMut.isPending || isFetching ? "animate-spin" : ""}`} />
+            {syncMut.isPending ? "Sync ML…" : "Sincronizar ML"}
           </Button>
           <Button size="sm" asChild>
             <Link href="/orders/new"><Plus className="h-3.5 w-3.5" /> Novo Pedido</Link>

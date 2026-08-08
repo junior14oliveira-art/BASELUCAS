@@ -11,14 +11,12 @@ import {
   Store,
   RefreshCw,
   ExternalLink,
-  Pause,
-  Play,
   AlertCircle,
   Link2,
   Search,
   Package,
   TrendingUp,
-  Save,
+  Lock,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ml, type MLListing } from "@/lib/ml/client";
@@ -40,8 +38,6 @@ export default function MercadoLivrePage() {
   const qc = useQueryClient();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("");
-  // Edições pendentes por anúncio, aplicadas em lote no "Salvar alterações".
-  const [edits, setEdits] = useState<Record<string, { price?: number; quantity?: number }>>({});
 
   const { data: status, isLoading: statusLoading } = useQuery({
     queryKey: ["ml", "status"],
@@ -85,57 +81,6 @@ export default function MercadoLivrePage() {
     },
     onError: (err: Error) => toast.error(err.message),
   });
-
-  const toggleMut = useMutation({
-    mutationFn: ({ itemId, next }: { itemId: string; next: "active" | "paused" }) =>
-      next === "paused" ? ml.pause(itemId) : ml.activate(itemId),
-    onSuccess: (_, { next }) => {
-      toast.success(next === "paused" ? "Anúncio pausado" : "Anúncio ativado");
-      qc.invalidateQueries({ queryKey: ["ml", "listings"] });
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
-
-  const bulkMut = useMutation({
-    mutationFn: () =>
-      ml.bulkUpdate(
-        Object.entries(edits).map(([item_id, values]) => ({ item_id, ...values })),
-      ),
-    onSuccess: (result) => {
-      if (result.failed > 0) {
-        toast.warning(`${result.updated} atualizados, ${result.failed} falharam`);
-        result.errors.forEach((e) => toast.error(`${e.item_id}: ${e.error}`));
-      } else {
-        toast.success(`${result.updated} anúncios atualizados no Mercado Livre`);
-      }
-      setEdits({});
-      qc.invalidateQueries({ queryKey: ["ml", "listings"] });
-    },
-    onError: (err: Error) => toast.error(err.message),
-  });
-
-  const setEdit = (itemId: string, field: "price" | "quantity", raw: string, original: number) => {
-    const value = field === "price" ? parseFloat(raw) : parseInt(raw, 10);
-    setEdits((prev) => {
-      const next = { ...prev };
-      const entry = { ...(next[itemId] || {}) };
-
-      if (Number.isNaN(value) || value === original) {
-        delete entry[field];
-      } else {
-        entry[field] = value;
-      }
-
-      if (Object.keys(entry).length === 0) {
-        delete next[itemId];
-      } else {
-        next[itemId] = entry;
-      }
-      return next;
-    });
-  };
-
-  const pendingCount = Object.keys(edits).length;
 
   // ---------------------------------------------------------------------
   // Estados de configuração / conexão
@@ -232,26 +177,29 @@ ML_REDIRECT_URI=${status?.redirect_uri || "http://localhost:8000/api/v1/ml/auth/
         </div>
 
         <div className="flex items-center gap-2">
-          {pendingCount > 0 && (
-            <Button
-              variant="success"
-              onClick={() => bulkMut.mutate()}
-              disabled={bulkMut.isPending}
-            >
-              <Save className="h-4 w-4" />
-              Salvar {pendingCount} {pendingCount === 1 ? "alteração" : "alterações"}
-            </Button>
-          )}
           <Button
             variant="outline"
             onClick={() => syncMut.mutate()}
             disabled={syncMut.isPending}
+            title="Sync read-only → base local (não altera o ML)"
           >
             <RefreshCw className={`h-4 w-4 ${syncMut.isPending ? "animate-spin" : ""}`} />
-            {syncMut.isPending ? "Sincronizando..." : "Sincronizar"}
+            {syncMut.isPending ? "Sincronizando..." : "Sincronizar (leitura)"}
           </Button>
         </div>
       </div>
+
+      {status.ml_read_only !== false && (
+        <Card className="border-orange-500/40 bg-orange-50 dark:bg-orange-950/20">
+          <CardContent className="flex items-center gap-2 py-3 text-sm">
+            <Lock className="h-4 w-4 text-orange-600" />
+            <span>
+              <strong>Somente leitura — em construção.</strong> Estoque, preço, pausar/ativar e
+              respostas no Mercado Livre estão desativados até homologação.
+            </span>
+          </CardContent>
+        </Card>
+      )}
 
       {status.accounts.some((a) => a.token_expired) && (
         <Card className="border-yellow-500/50 bg-yellow-50 dark:bg-yellow-950/20">
@@ -325,19 +273,12 @@ ML_REDIRECT_URI=${status?.redirect_uri || "http://localhost:8000/api/v1/ml/auth/
                     <th className="p-3 font-medium">Estoque</th>
                     <th className="p-3 font-medium">Vendidos</th>
                     <th className="p-3 font-medium">Status</th>
-                    <th className="p-3 font-medium">Ações</th>
+                    <th className="p-3 font-medium">Link</th>
                   </tr>
                 </thead>
                 <tbody>
                   {listings.map((listing) => (
-                    <ListingRow
-                      key={listing.id}
-                      listing={listing}
-                      edit={edits[listing.id]}
-                      onEdit={setEdit}
-                      onToggle={(next) => toggleMut.mutate({ itemId: listing.id, next })}
-                      toggling={toggleMut.isPending}
-                    />
+                    <ListingRow key={listing.id} listing={listing} />
                   ))}
                 </tbody>
               </table>
@@ -375,23 +316,9 @@ function KpiTile({
   );
 }
 
-function ListingRow({
-  listing,
-  edit,
-  onEdit,
-  onToggle,
-  toggling,
-}: {
-  listing: MLListing;
-  edit?: { price?: number; quantity?: number };
-  onEdit: (itemId: string, field: "price" | "quantity", raw: string, original: number) => void;
-  onToggle: (next: "active" | "paused") => void;
-  toggling: boolean;
-}) {
-  const isDirty = !!edit;
-
+function ListingRow({ listing }: { listing: MLListing }) {
   return (
-    <tr className={`border-b transition-colors hover:bg-muted/40 ${isDirty ? "bg-blue-50/60 dark:bg-blue-950/20" : ""}`}>
+    <tr className="border-b transition-colors hover:bg-muted/40">
       <td className="max-w-[320px] p-3">
         <div className="flex items-center gap-2">
           {listing.thumbnail && (
@@ -417,28 +344,12 @@ function ListingRow({
 
       <td className="p-3 text-muted-foreground">{listing.sku || "—"}</td>
 
-      <td className="p-3">
-        <Input
-          type="number"
-          step="0.01"
-          min="0"
-          defaultValue={listing.price}
-          onChange={(e) => onEdit(listing.id, "price", e.target.value, listing.price)}
-          className="h-8 w-28"
-        />
-        <span className="text-xs text-muted-foreground">{formatCurrency(listing.price)}</span>
-      </td>
+      <td className="p-3 font-medium">{formatCurrency(listing.price)}</td>
 
       <td className="p-3">
-        <Input
-          type="number"
-          min="0"
-          defaultValue={listing.available_quantity}
-          onChange={(e) =>
-            onEdit(listing.id, "quantity", e.target.value, listing.available_quantity)
-          }
-          className={`h-8 w-20 ${listing.available_quantity === 0 ? "border-red-400" : ""}`}
-        />
+        <span className={listing.available_quantity === 0 ? "text-red-600 font-medium" : ""}>
+          {listing.available_quantity} un.
+        </span>
       </td>
 
       <td className="p-3 font-medium">{listing.sold_quantity}</td>
@@ -450,30 +361,17 @@ function ListingRow({
       </td>
 
       <td className="p-3">
-        <div className="flex items-center gap-1">
-          {listing.status !== "closed" && (
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              disabled={toggling}
-              title={listing.status === "active" ? "Pausar anúncio" : "Ativar anúncio"}
-              onClick={() => onToggle(listing.status === "active" ? "paused" : "active")}
-            >
-              {listing.status === "active" ? (
-                <Pause className="h-4 w-4" />
-              ) : (
-                <Play className="h-4 w-4" />
-              )}
+        {listing.permalink ? (
+          <a href={listing.permalink} target="_blank" rel="noopener noreferrer">
+            <Button variant="ghost" size="icon-sm" title="Abrir no Mercado Livre">
+              <ExternalLink className="h-4 w-4" />
             </Button>
-          )}
-          {listing.permalink && (
-            <a href={listing.permalink} target="_blank" rel="noopener noreferrer">
-              <Button variant="ghost" size="icon-sm" title="Abrir no Mercado Livre">
-                <ExternalLink className="h-4 w-4" />
-              </Button>
-            </a>
-          )}
-        </div>
+          </a>
+        ) : (
+          <span className="text-xs text-muted-foreground" title="Somente leitura — em construção">
+            —
+          </span>
+        )}
       </td>
     </tr>
   );

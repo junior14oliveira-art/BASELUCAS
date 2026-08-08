@@ -1,4 +1,6 @@
-# Manual do Usuário: Plataforma SaaS Omnichannel AI (BaseLinker Spec)
+# Manual do Usuário: BASE ANTIGRAVITY (hub estilo BaseLinker)
+
+> Dados operacionais vêm do **Mercado Livre via feed 4MC** (cache local). BaseLinker é só referência de UX — ver `docs/DATA_SOURCE_ML_FEED.md`.
 
 Guia completo de operação dos 15 Módulos e dos 9 Agentes de IA autônomos da plataforma.
 

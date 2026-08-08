@@ -1,6 +1,10 @@
-# PIPELINE DE PROMPTS & ROADMAP — Paridade Total BaseLinker
+# PIPELINE DE PROMPTS & ROADMAP — Paridade de molde UI (BaseLinker)
 
-> Atualizado em **07/08/2026** · Diagnóstico real do código (`apps/web` + API oficial).  
+> **Contexto de produto (07/08/2026):** BASE ANTIGRAVITY é o **nosso** hub estilo BaseLinker.  
+> BaseLinker neste arquivo = **molde de UI/API client** (`apps/web`), **não** a fonte de dados.  
+> Dados reais = ML via 4MC + SQLite — ver `docs/DATA_SOURCE_ML_FEED.md`, `docs/ROADMAP.md` (Sprints 1–4), skill `omnichannel-hub`.
+
+> Atualizado em **07/08/2026** · Diagnóstico do molde (`apps/web` + API oficial BL).  
 > Use cada bloco de prompt no Cursor/Kiro. Execute **um sprint por vez**, valide, avance.
 
 ---

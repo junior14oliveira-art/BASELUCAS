@@ -31,6 +31,9 @@ class Settings(BaseSettings):
     # BaseLinker — sempre via .env, nunca no código-fonte
     BASELINKER_API_TOKEN: str = ""
     BASELINKER_TOKEN: str = ""  # alias legado aceito no .env
+    # True (default): bloqueia writes BL mesmo com allow_write=True.
+    # Coordenar com ML_READ_ONLY (outro agente) — não reabrir writes sem aprovação.
+    BASELINKER_READ_ONLY: bool = True
 
     # Mercado Livre — credenciais do app criado no DevCenter
     # https://developers.mercadolivre.com.br/devcenter
@@ -40,11 +43,23 @@ class Settings(BaseSettings):
     ML_SITE_ID: str = "MLB"  # MLB = Brasil
     ML_WEBHOOK_SECRET: str = ""
 
+    # Feed read-only (bridge Base Antigravity → ML)
+    # Base: .../api/base-antigravity/ml  → /feed /orders /items /questions /token
+    ML_FEED_BASE_URL: str = "https://fourmc-market-api.onrender.com/api/base-antigravity/ml"
+    ML_FEED_URL: str = "https://fourmc-market-api.onrender.com/api/base-antigravity/ml/feed"
+    ML_FEED_ORDERS_URL: str = "https://fourmc-market-api.onrender.com/api/base-antigravity/ml/orders"
+    ML_FEED_TOKEN_URL: str = "https://fourmc-market-api.onrender.com/api/base-antigravity/ml/token"
+
+    # Trava global: com True, clients/routers ML recusam POST/PUT/PATCH/DELETE
+    # que mutem anúncios, estoque, preço, perguntas, etc. Só liberar após homologação.
+    ML_READ_ONLY: bool = True
+
     # CORS Origins — aceita lista JSON ou valores separados por vírgula no .env.
     # NoDecode desliga o parser JSON do pydantic-settings para que o validator
     # abaixo receba a string crua de "a,b,c".
     ALLOWED_ORIGINS: Annotated[List[str], NoDecode] = [
         "http://localhost:3000",
+        "http://127.0.0.1:3000",
         "http://localhost:8000",
         "http://127.0.0.1:8000",
     ]

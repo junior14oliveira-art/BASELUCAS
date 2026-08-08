@@ -40,6 +40,8 @@ export interface MLListing {
 
 export interface MLStatus {
   configured: boolean;
+  ml_read_only?: boolean;
+  write_policy?: string;
   site_id: string;
   redirect_uri: string;
   connected_accounts: number;
@@ -52,6 +54,13 @@ export interface MLStatus {
     last_sync_at: string | null;
   }>;
   setup_hint: string | null;
+}
+
+const WRITE_BLOCKED =
+  "Somente leitura — em construção. Escritas no Mercado Livre estão bloqueadas (ML_READ_ONLY).";
+
+function refuseWrite(): never {
+  throw new Error(WRITE_BLOCKED);
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -98,27 +107,17 @@ export const ml = {
     return request<{ total: number; listings: MLListing[] }>(`/listings?${query}`);
   },
 
-  updatePrice: (itemId: string, price: number) =>
-    request(`/listings/${itemId}/price`, {
-      method: "PUT",
-      body: JSON.stringify({ price }),
-    }),
+  updatePrice: (_itemId: string, _price: number) => refuseWrite(),
 
-  updateStock: (itemId: string, quantity: number) =>
-    request(`/listings/${itemId}/stock`, {
-      method: "PUT",
-      body: JSON.stringify({ quantity }),
-    }),
+  updateStock: (_itemId: string, _quantity: number) => refuseWrite(),
 
-  pause: (itemId: string) => request(`/listings/${itemId}/pause`, { method: "POST" }),
+  pause: (_itemId: string) => refuseWrite(),
 
-  activate: (itemId: string) => request(`/listings/${itemId}/activate`, { method: "POST" }),
+  activate: (_itemId: string) => refuseWrite(),
 
-  bulkUpdate: (updates: Array<{ item_id: string; price?: number; quantity?: number }>) =>
-    request<{ updated: number; failed: number; errors: Array<{ item_id: string; error: string }> }>(
-      "/listings/bulk-update",
-      { method: "POST", body: JSON.stringify({ updates }) },
-    ),
+  bulkUpdate: (
+    _updates: Array<{ item_id: string; price?: number; quantity?: number }>,
+  ) => refuseWrite(),
 
   simulateFees: (price: number, categoryId?: string) => {
     const query = new URLSearchParams({ price: String(price) });

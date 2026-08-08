@@ -33,15 +33,33 @@ class RealOrderDB(Base):
     channel_name: Mapped[str] = mapped_column(String(100), default="Mercado Livre")
     items_json: Mapped[str] = mapped_column(Text, default="[]")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    # Enriquecimento via /ml/order + /ml/shipment (bridge 4MC)
+    shipping_id: Mapped[str] = mapped_column(String(50), default="")
+    shipping_status: Mapped[str] = mapped_column(String(50), default="")
+    tracking_number: Mapped[str] = mapped_column(String(255), default="")
+    shipping_address_json: Mapped[str] = mapped_column(Text, default="{}")
+    marketplace_fee: Mapped[float] = mapped_column(Float, default=0.0)
+    buyer_doc: Mapped[str] = mapped_column(String(50), default="")  # CPF/CNPJ se bridge expor
+    pack_id: Mapped[str] = mapped_column(String(50), default="")
+    enrichment_json: Mapped[str] = mapped_column(Text, default="{}")
 
 class RealProductDB(Base):
     __tablename__ = "real_products"
-    id: Mapped[str] = mapped_column(String(100), primary_key=True)
-    inventory_id: Mapped[str] = mapped_column(String(100), default="50262")
+    id: Mapped[str] = mapped_column(String(100), primary_key=True)  # MLB…
+    inventory_id: Mapped[str] = mapped_column(String(100), default="ML")
     sku: Mapped[str] = mapped_column(String(255), default="")
     name: Mapped[str] = mapped_column(String(500), default="")
     price: Mapped[float] = mapped_column(Float, default=0.0)
-    stock: Mapped[int] = mapped_column(Integer, default=0)
+    stock: Mapped[int] = mapped_column(Integer, default=0)  # available_quantity
+    status: Mapped[str] = mapped_column(String(50), default="")
+    permalink: Mapped[str] = mapped_column(String(500), default="")
+    thumbnail: Mapped[str] = mapped_column(String(500), default="")
+    sold_quantity: Mapped[int] = mapped_column(Integer, default=0)
+    currency_id: Mapped[str] = mapped_column(String(10), default="BRL")
+    ean: Mapped[str] = mapped_column(String(64), default="")
+    logistic_type: Mapped[str] = mapped_column(String(50), default="")
+    ml_inventory_id: Mapped[str] = mapped_column(String(100), default="")  # fulfillment
+    variations_json: Mapped[str] = mapped_column(Text, default="[]")
 
 # ---------------------------------------------------------------------------
 # Mercado Livre
@@ -123,6 +141,21 @@ class MLQuestionDB(Base):
     date_created: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
 
+class MLClaimDB(Base):
+    """Reclamação / mediación do Mercado Livre (bridge /ml/claims)."""
+    __tablename__ = "ml_claims"
+    id: Mapped[str] = mapped_column(String(50), primary_key=True)
+    ml_user_id: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    resource_id: Mapped[str] = mapped_column(String(50), default="")  # order/pack
+    status: Mapped[str] = mapped_column(String(50), default="", index=True)
+    type: Mapped[str] = mapped_column(String(50), default="")
+    stage: Mapped[str] = mapped_column(String(50), default="")
+    reason_id: Mapped[str] = mapped_column(String(100), default="")
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    date_created: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    synced_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+
 class MLCategoryMapDB(Base):
     """De-Para entre a categoria interna do catálogo e a categoria do Mercado Livre."""
     __tablename__ = "ml_category_map"
@@ -150,6 +183,65 @@ class MLWebhookEventDB(Base):
     received_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
 
+class SyncMetaDB(Base):
+    """Metadados de sincronização local (última puxada do feed ML)."""
+    __tablename__ = "sync_meta"
+    key: Mapped[str] = mapped_column(String(100), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # SQLite create_all não adiciona colunas novas em tabelas já existentes.
+        await conn.run_sync(_ensure_real_products_columns)
+        await conn.run_sync(_ensure_real_orders_columns)
+
+
+def _ensure_columns(sync_conn, table: str, alters: list) -> None:
+    try:
+        rows = sync_conn.exec_driver_sql(f"PRAGMA table_info({table})").fetchall()
+    except Exception:
+        return
+    existing = {r[1] for r in rows} if rows else set()
+    for col, sql in alters:
+        if col not in existing:
+            sync_conn.exec_driver_sql(sql)
+
+
+def _ensure_real_products_columns(sync_conn) -> None:
+    """Migração leve: colunas extras do catálogo ML em real_products."""
+    _ensure_columns(
+        sync_conn,
+        "real_products",
+        [
+            ("status", "ALTER TABLE real_products ADD COLUMN status VARCHAR(50) DEFAULT ''"),
+            ("permalink", "ALTER TABLE real_products ADD COLUMN permalink VARCHAR(500) DEFAULT ''"),
+            ("thumbnail", "ALTER TABLE real_products ADD COLUMN thumbnail VARCHAR(500) DEFAULT ''"),
+            ("sold_quantity", "ALTER TABLE real_products ADD COLUMN sold_quantity INTEGER DEFAULT 0"),
+            ("currency_id", "ALTER TABLE real_products ADD COLUMN currency_id VARCHAR(10) DEFAULT 'BRL'"),
+            ("ean", "ALTER TABLE real_products ADD COLUMN ean VARCHAR(64) DEFAULT ''"),
+            ("logistic_type", "ALTER TABLE real_products ADD COLUMN logistic_type VARCHAR(50) DEFAULT ''"),
+            ("ml_inventory_id", "ALTER TABLE real_products ADD COLUMN ml_inventory_id VARCHAR(100) DEFAULT ''"),
+            ("variations_json", "ALTER TABLE real_products ADD COLUMN variations_json TEXT DEFAULT '[]'"),
+        ],
+    )
+
+
+def _ensure_real_orders_columns(sync_conn) -> None:
+    """Migração leve: enriquecimento de pedidos (shipment/fees/doc)."""
+    _ensure_columns(
+        sync_conn,
+        "real_orders",
+        [
+            ("shipping_id", "ALTER TABLE real_orders ADD COLUMN shipping_id VARCHAR(50) DEFAULT ''"),
+            ("shipping_status", "ALTER TABLE real_orders ADD COLUMN shipping_status VARCHAR(50) DEFAULT ''"),
+            ("tracking_number", "ALTER TABLE real_orders ADD COLUMN tracking_number VARCHAR(255) DEFAULT ''"),
+            ("shipping_address_json", "ALTER TABLE real_orders ADD COLUMN shipping_address_json TEXT DEFAULT '{}'"),
+            ("marketplace_fee", "ALTER TABLE real_orders ADD COLUMN marketplace_fee FLOAT DEFAULT 0.0"),
+            ("buyer_doc", "ALTER TABLE real_orders ADD COLUMN buyer_doc VARCHAR(50) DEFAULT ''"),
+            ("pack_id", "ALTER TABLE real_orders ADD COLUMN pack_id VARCHAR(50) DEFAULT ''"),
+            ("enrichment_json", "ALTER TABLE real_orders ADD COLUMN enrichment_json TEXT DEFAULT '{}'"),
+        ],
+    )

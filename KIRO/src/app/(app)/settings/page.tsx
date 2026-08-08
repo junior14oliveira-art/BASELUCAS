@@ -83,7 +83,7 @@ export default function SettingsPage() {
     <div className="p-4 md:p-6 max-w-2xl space-y-6">
       <div>
         <h1 className="text-base font-semibold">Configurações</h1>
-        <p className="text-xs text-muted-foreground">Sistema JRDEV1 — Powered by BaseLinker API</p>
+        <p className="text-xs text-muted-foreground">Sistema JRDEV1 — dados via Mercado Livre / 4M&amp;C (cache local)</p>
       </div>
 
       {/* Connection status */}
@@ -105,7 +105,7 @@ export default function SettingsPage() {
                 <div className="w-4 h-4 rounded-full bg-red-500" />
               )}
               <span className="text-sm font-medium">
-                {testing ? "Testando..." : isConnected ? "Conectado ao BaseLinker" : "Sem conexão"}
+                {testing ? "Testando..." : isConnected ? "API local / molde OK" : "Sem conexão"}
               </span>
             </div>
             <Button variant="outline" size="sm" onClick={() => retest()}>
@@ -114,12 +114,12 @@ export default function SettingsPage() {
           </div>
           <div className="grid grid-cols-2 gap-3 text-sm">
             <div>
-              <p className="text-xs text-muted-foreground">Endpoint</p>
-              <p className="font-mono text-xs">api.baselinker.com</p>
+              <p className="text-xs text-muted-foreground">Fonte de pedidos</p>
+              <p className="font-mono text-xs">127.0.0.1:8000 (ML / 4M&amp;C)</p>
             </div>
             <div>
-              <p className="text-xs text-muted-foreground">Proxy</p>
-              <p className="font-mono text-xs">/api/bl (server-side)</p>
+              <p className="text-xs text-muted-foreground">UI molde</p>
+              <p className="font-mono text-xs">layout estilo BaseLinker</p>
             </div>
             <div>
               <p className="text-xs text-muted-foreground">Rate Limit</p>

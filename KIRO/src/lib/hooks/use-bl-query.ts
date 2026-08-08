@@ -1,54 +1,88 @@
 /**
- * Central data hooks — typed wrappers over react-query + BaseLinker client
- * All stale/refetch times tuned for rate-limit (100 req/min)
+ * Central data hooks — pedidos/dashboard leem o cache SQLite via FastAPI
+ * (feed Mercado Livre / 4MC). BaseLinker permanece só como molde de UI.
  */
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { bl } from "@/lib/baselinker/client";
+import { localApi } from "@/lib/local-api/client";
+import {
+  filterOrdersByDate,
+  mapLocalOrderToBL,
+  mapLocalStatuses,
+} from "@/lib/local-api/map-orders";
 import type {
-  BLOrder, BLOrderStatus, BLInventory, BLWarehouse,
+  BLInventory, BLWarehouse,
   BLPickPackCart, BLCrmClient, BLSupplier,
 } from "@/lib/baselinker/types";
 
-// ─── Orders ──────────────────────────────────────────────────────────────────
+// ─── Orders (ML feed cache via FastAPI) ──────────────────────────────────────
 
 export function useOrders(params: Record<string, unknown> = {}) {
+  const dateFrom =
+    typeof params.date_confirmed_from === "number"
+      ? params.date_confirmed_from
+      : undefined;
+  const statusId =
+    typeof params.status_id === "number" ? params.status_id : undefined;
+
   return useQuery({
-    queryKey: ["orders", params],
-    queryFn: () => bl.getOrders({
-      date_confirmed_from: Math.floor(Date.now() / 1000) - 30 * 86400,
-      get_unconfirmed_orders: false,
-      ...params,
-    }),
-    staleTime: 20_000,
-    refetchInterval: 60_000,
-    select: (d) => (d as { orders?: BLOrder[] })?.orders ?? [],
+    queryKey: ["orders", "local-ml", params],
+    queryFn: async () => {
+      const data = await localApi.listOrders();
+      let orders = (data.orders ?? []).map(mapLocalOrderToBL);
+      orders = filterOrdersByDate(orders, dateFrom);
+      if (statusId != null) {
+        orders = orders.filter((o) => o.order_status_id === statusId);
+      }
+      return orders;
+    },
+    staleTime: 60_000,
+    // Sem polling agressivo — refresh manual / sync-now
+    refetchInterval: false,
   });
 }
 
 export function useOrder(id: number) {
   return useQuery({
-    queryKey: ["order", id],
-    queryFn: () => bl.getOrders({ order_id: id }),
+    queryKey: ["order", "local-ml", id],
+    queryFn: async () => {
+      const data = await localApi.listOrders();
+      return (data.orders ?? []).map(mapLocalOrderToBL).find((o) => o.order_id === id);
+    },
     enabled: !!id,
-    select: (d) => (d as { orders?: BLOrder[] })?.orders?.[0],
+    staleTime: 60_000,
   });
 }
 
 export function useOrderStatuses() {
   return useQuery({
-    queryKey: ["order-statuses"],
-    queryFn: () => bl.getOrderStatusList(),
-    staleTime: 10 * 60_000,
-    select: (d) => (d as { statuses?: BLOrderStatus[] })?.statuses ?? [],
+    queryKey: ["order-statuses", "local-ml"],
+    queryFn: async () => mapLocalStatuses(await localApi.statuses()),
+    staleTime: 5 * 60_000,
+  });
+}
+
+/** Puxa feed ML (4MC) → grava SQLite local. */
+export function useSyncOrdersNow() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => localApi.syncNow(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["orders"] });
+      qc.invalidateQueries({ queryKey: ["order-statuses"] });
+      qc.invalidateQueries({ queryKey: ["order"] });
+    },
   });
 }
 
 export function useJournal(lastLogId = 0) {
   return useQuery({
     queryKey: ["journal", lastLogId],
-    queryFn: () => bl.getJournalList(lastLogId),
-    staleTime: 15_000,
-    refetchInterval: 30_000,
+    // Journal BaseLinker desligado — feed de atividade vem do cache ML no futuro
+    queryFn: async () => ({ logs: [] as { log_id: number; order_id: number; log_type: number; date: number }[] }),
+    staleTime: Infinity,
+    refetchInterval: false,
+    enabled: false,
   });
 }
 
@@ -57,9 +91,10 @@ export function useJournal(lastLogId = 0) {
 export function usePickPackCarts() {
   return useQuery({
     queryKey: ["pickpack-carts"],
-    queryFn: () => bl.getPickPackCarts(),
-    staleTime: 30_000,
-    select: (d) => (d as { carts?: BLPickPackCart[] })?.carts ?? [],
+    // PickPack BaseLinker desligado no molde — sem dados operacionais BL
+    queryFn: async () => [] as BLPickPackCart[],
+    staleTime: Infinity,
+    enabled: false,
   });
 }
 

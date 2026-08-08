@@ -21,7 +21,12 @@ from src.infrastructure.database import (
     MLQuestionDB,
     RealOrderDB,
 )
-from src.infrastructure.mercadolivre_client import MercadoLivreClient, MercadoLivreError
+from src.config import settings
+from src.infrastructure.mercadolivre_client import (
+    MercadoLivreClient,
+    MercadoLivreError,
+    MercadoLivreReadOnlyError,
+)
 
 
 async def build_client(account: MLAccountDB) -> MercadoLivreClient:
@@ -283,7 +288,9 @@ class MercadoLivreSyncService:
     # ------------------------------------------------------------------
 
     async def push_stock(self, account: MLAccountDB, sku: str, quantity: int) -> Dict[str, Any]:
-        """Propaga o estoque de um SKU para todos os anúncios vinculados a ele."""
+        """Propaga estoque — bloqueado enquanto ML_READ_ONLY=True."""
+        if settings.ML_READ_ONLY:
+            raise MercadoLivreReadOnlyError("PUT", f"/items?sku={sku}&available_quantity")
         client = await build_client(account)
 
         async with async_session() as session:
@@ -301,7 +308,7 @@ class MercadoLivreSyncService:
         updated, errors = 0, []
         for listing in listings:
             try:
-                await client.update_item_stock(listing.id, quantity)
+                await client.update_item_stock(listing.id, quantity, allow_write=True)
                 updated += 1
             except MercadoLivreError as exc:
                 errors.append({"item_id": listing.id, "error": exc.message})
@@ -318,9 +325,11 @@ class MercadoLivreSyncService:
         return {"updated": updated, "errors": errors}
 
     async def push_price(self, account: MLAccountDB, item_id: str, price: float) -> Dict[str, Any]:
-        """Atualiza o preço de um anúncio específico."""
+        """Atualiza preço — bloqueado enquanto ML_READ_ONLY=True."""
+        if settings.ML_READ_ONLY:
+            raise MercadoLivreReadOnlyError("PUT", f"/items/{item_id}")
         client = await build_client(account)
-        response = await client.update_item_price(item_id, price)
+        response = await client.update_item_price(item_id, price, allow_write=True)
 
         async with async_session() as session:
             row = await session.get(MLListingDB, item_id)
