@@ -12,26 +12,49 @@ router = APIRouter(prefix="/orders", tags=["Pedidos Reais"])
 
 @router.post("/sync-now")
 async def trigger_manual_sync():
-    """Puxa o feed read-only do Mercado Livre e grava no banco local."""
+    """Puxa os dados via OAuth nativo se conectado, senão cai para o feed read-only."""
+    from src.infrastructure.ml_sync_service import ml_sync_service, get_account
+    
+    # Tenta usar a integração nativa OAuth
+    account = await get_account(None)
+    if account and account.access_token:
+        try:
+            stats = await ml_sync_service.sync_all(account)
+            return {
+                "message": f"Sincronização Nativa concluída para {account.nickname or 'ML'}.",
+                "stats": stats,
+                "native": True
+            }
+        except Exception as e:
+            return {
+                "message": f"Erro na Sincronização Nativa: {str(e)}",
+                "stats": {"error": str(e)},
+                "native": True
+            }
+
+    # Fallback para o feed read-only (bridge)
     stats = await sync_service.sync_all_real_data()
     ok = stats.get("ok", True)
-    account = (stats.get("account") or {}).get("nickname") or "ML"
+    account_name = (stats.get("account") or {}).get("nickname") or "ML"
     if not ok:
         return {
-            "message": f"Falha ao sincronizar feed Mercado Livre ({account}).",
+            "message": f"Falha ao sincronizar feed Mercado Livre ({account_name}).",
             "stats": stats,
+            "native": False
         }
     if stats.get("cache_preserved"):
         return {
             "message": (
-                f"Feed ML ({account}) veio vazio — cache local preservado "
+                f"Feed ML ({account_name}) veio vazio — cache local preservado "
                 f"({stats.get('orders_in_db', 0)} pedidos)."
             ),
             "stats": stats,
+            "native": False
         }
     return {
-        "message": f"Sincronização do feed Mercado Livre ({account}) concluída.",
+        "message": f"Sincronização do feed Mercado Livre ({account_name}) concluída.",
         "stats": stats,
+        "native": False
     }
 
 

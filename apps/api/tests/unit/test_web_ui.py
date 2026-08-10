@@ -174,6 +174,26 @@ class TestWebUIRouter(unittest.TestCase):
             except FileNotFoundError:
                 pass
 
+    def test_6_expedition_js_handlers_present(self):
+        """Expedição Etapa 4: funções JS de bipagem presentes no /app."""
+        response = self.client.get("/app")
+        self.assertEqual(response.status_code, 200)
+        html = response.text
+        for fn in (
+            "refreshExpeditionPanel",
+            "submitExpeditionScan",
+            "armExpeditionTest",
+            "bindExpeditionScanner",
+        ):
+            pattern = rf"(function\s+{fn}\b|async function\s+{fn}\b)"
+            self.assertRegex(
+                html,
+                pattern,
+                f"Missing expedition handler: {fn}",
+            )
+        self.assertIn("expedition-scan-input", html)
+        self.assertIn("/api/v1/expedition/scan", html)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -6,7 +6,7 @@ Roles: Administrador | Técnico (Montagem) | Expedição (Separação).
 
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import select
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, ConfigDict
 from typing import List, Optional
 from datetime import datetime
 
@@ -51,15 +51,14 @@ class OperatorUpdate(BaseModel):
 
 
 class OperatorResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: int
     name: str
     role: str
     email: str
     is_active: bool
     created_at: datetime
-
-    class Config:
-        from_attributes = True
 
 
 INITIAL_OPERATORS = [

@@ -1,0 +1,6 @@
+node_modules/
+data/
+.env
+var/zpl_dry_run/*
+!var/zpl_dry_run/.gitkeep
+*.log

@@ -5,10 +5,24 @@
 > As entregas oficiais são as **Etapas 1–4** abaixo (chão de fábrica + fiscal + logística + convergência física).  
 > Diagrama paralelo: `docs/PIPELINE_ASSINCRONO.md`.  
 > Skill: `.agents/skills/omnichannel-hub/SKILL.md`.  
-> Vocabulário alinhado em 10/08/2026: “Fases 1–4” = histórico; “Etapas 1–4” = plano oficial.  
 > Vocabulário alinhado em 10/08/2026: “Fases 1–4” = histórico; “Etapas 1–4” = plano oficial.
 
 Este é o mapa de batalha para finalizarmos 100% o motor do **Pipeline Assíncrono** (onde a burocracia corre solta enquanto o técnico trabalha sem pausas).
+
+---
+
+## Panorama atual (10/08/2026)
+
+| Etapa | Tema | Status | Resumo |
+|---|---|---|---|
+| **Pré-req.** | Infra + feed ML → SQLite | 🟢 Concluído | FastAPI, `/app`, sync 4MC, Guia Pedidos |
+| **1** | Usuários + pickup Kanban | 🟢 Concluído | CRUD, aba Equipe, Pegar/Enviar/Liberar; JWT futuro |
+| **2** | Macro fiscal (Bling) | 🟡 Em andamento | OAuth, push pedido, auto-push no sync; NF-e gated |
+| **3** | Webhook + ZPL engatilhado | 🟢 Implementado | Código completo; homologação ML/Bling para ponta a ponta real |
+| **4** | Bipagem + impressão | 🟡 Em andamento | UI + API prontas; falta impressora física em bancada |
+
+**Bloqueios de homologação (não são “não iniciado”):**  
+`BLING_READ_ONLY=true` · `NFE_EMIT_ENABLED=false` · `ML_READ_ONLY=true` (default) — ver `docs/LABELS_ML.md`.
 
 ---
 
@@ -29,45 +43,83 @@ Este é o mapa de batalha para finalizarmos 100% o motor do **Pipeline Assíncro
 ---
 
 ## 🎯 ETAPA 1: Fundação do Chão de Fábrica (Gestão de Usuários)
-**Status:** 🟡 Pronto para iniciar (Foco 2)
+**Status:** 🟢 Concluído (operadores + pickup local; login/JWT fica para sprint futura)
 
 Para o técnico poder trabalhar nos pedidos de forma independente no Kanban, ele precisa "existir" no sistema e "puxar" os pacotes para ele.
-- [ ] Construir a aba de Usuários/Equipe na Interface.
-- [ ] Ligar a UI com o CRUD de operadores (`/api/v1/operators`).
-- [ ] Implementar as permissões (Role): Administrador, Técnico (Montagem), Expedição (Separação).
-- [ ] Fazer com que os pedidos nas filas (ex: "Fila Técnico") fiquem vinculados ao usuário logado.
+
+- [x] CRUD de operadores no backend (`/api/v1/operators`, alias `/api/v1/users`) — `operators.py`, `OperatorDB`
+- [x] Permissões (Role): Administrador, Técnico (Montagem), Expedição (Separação) — `operator_roles.py`
+- [x] Seletor de operador no header + modal CRUD na UI `/app` — `web_ui.py`
+- [x] Aba dedicada **Usuários/Equipe** na rail `/app` — `web_ui.py` (`#view-users`)
+- [x] Botões **Pegar / Enviar / Liberar** na tabela de pedidos ligados ao operador selecionado — `order_pickup.py`, rotas em `orders.py`
+- [x] Lógica de pickup local com vínculo `picked_by` / `picked_by_id` + fila `Fila · {nome}` — `native_queues.py`, `order_pickup.py`
+- [x] Sync ML preserva pickup e filas pessoais ao atualizar cache — `sync_service.py`
+- [ ] Autenticação real (login/sessão JWT) — hoje o operador é escolha local no dropdown
+
+**Referências:** `.agents/skills/omnichannel-hub/SKILL.md` § Filas nativas + pickup.
 
 ---
 
 ## 🎯 ETAPA 2: A "Macro Fiscal" (Integração Bling)
-**Status:** 🔴 Não Iniciado (Foco 3)
+**Status:** 🟡 Em andamento
 
 Esta etapa automatiza a burocracia chata e tira o ser humano do processo de emitir notas.
-- [ ] Criar tabela no SQLite (`BlingConfigDB`) para armazenar o Token OAuth do Bling.
-- [ ] Criar a rota no backend para receber a venda do ML e dar o `POST` para o Bling gerando o **Pedido de Venda**.
-- [ ] Configurar o disparo automático: ao receber a confirmação de pagamento do Mercado Livre, o sistema manda para o Bling e comanda a geração da **NF-e**.
+
+- [x] Tabela SQLite `BlingConfigDB` (OAuth, client_id/secret, tokens por conta) — `database.py`
+- [x] Rotas Bling: credenciais, tokens, OAuth, teste, status — `bling.py`
+- [x] `POST /bling/orders/{id}/push` — cria **Pedido de Venda** a partir do pedido ML local — `bling_service.py`
+- [x] `POST /bling/orders/auto-push-paid` + hook no fim do sync ML — `sync_service.py`
+- [x] UI Integrações: modal Bling + botão em lote “Enviar para Bling (NF-e)” — `web_ui.py`
+- [ ] Disparo **100% automático** em produção (depende de credenciais Bling ativas + `BLING_READ_ONLY=false`)
+- [ ] Emissão **NF-e** real (`NFE_EMIT_ENABLED=true` + homologação SEFAZ) — hoje pedido pode ser criado; NF fica gated
+- [ ] Homologação ponta a ponta com conta Bling 4M&C em ambiente real
+
+**Referências:** `docs/BLING_API_STUDY.md` · `bling_client.py` · flags em `config.py`.
 
 ---
 
 ## 🎯 ETAPA 3: O Gatilho da Logística (Webhooks e ZPL)
-**Status:** 🟢 Implementado (Foco 4)
+**Status:** 🟢 Implementado *(homologação externa pendente)*
 
 Aqui é onde o sistema "ouve" o Bling e busca a etiqueta no Mercado Livre.
-- [x] Configurar o **Webhook do Bling** no nosso FastAPI (uma rota `POST /webhooks/bling/nfe`) para o Bling nos avisar assim que a Sefaz aprovar a nota.
-- [x] Ao receber a Chave de Acesso no webhook, o sistema injeta a chave automaticamente na API do Mercado Livre (`/billing_info`) — **gated** com `ML_READ_ONLY=true` (stub documentado em `docs/LABELS_ML.md`).
-- [x] O sistema baixa a etiqueta **ZPL** (Mercado Envios) em background e a deixa engatilhada (`zpl_armed` / `zpl_content` / `data/zpl_labels/`), mudando o status daquela caixa de "Aguardando Nota" para "Pronto para Bipagem".
+
+- [x] Webhook Bling NF-e: `POST /webhooks/bling/nfe` (+ alias `/api/v1/...`) — `webhooks.py`
+- [x] ACK rápido + processamento em background + log de eventos — `BlingNfeWebhookEventDB`
+- [x] Injeção de chave NF-e no ML (`/billing_info`) — `logistics_unlock_service.py` · **gated** com `ML_READ_ONLY=true` (stub documentado)
+- [x] Download ZPL Mercado Envios + engatilhamento (`zpl_armed`, `zpl_content`, `data/zpl_labels/`) — `ml_shipping_labels.py`
+- [x] Status local **Pronto para Bipagem** quando NF/ZPL ok — `logistics_unlock_service.py`
+- [ ] Validar webhook registrado no painel Bling apontando para URL pública do deploy
+- [ ] Fluxo real ML (billing + etiqueta) com `ML_READ_ONLY=false` após homologação OAuth
+
+**Referências:** `docs/LABELS_ML.md` · commits `d295f7c` / `aba0401` (webhook + unlock).
 
 ---
 
 ## 🎯 ETAPA 4: A Convergência Física (Pick & Pack + Impressão)
-**Status:** 🔴 Não Iniciado (Foco 5 - Final)
+**Status:** 🟡 Em andamento *(UI + API prontas; bancada física pendente)*
 
 O ápice do pipeline: o encontro entre a caixa física (que o técnico já embalou na Etapa 1) e a Etiqueta ZPL (que a Etapa 3 acabou de destravar).
-- [ ] Habilitar o campo de busca (Bipagem) para o Scanner USB na aba de expedição.
-- [ ] Criar a lógica: Ao "bipar" o código de barras, o sistema verifica se a Etiqueta ZPL está engatilhada.
-- [ ] Configurar comunicação via CUPS/Raw Print para enviar o código ZPL direto para as impressoras térmicas (Zebra/Elgin) da bancada.
+
+- [x] API bipagem: `POST /api/v1/expedition/scan` (valida `zpl_armed` → imprime) — `expedition.py`
+- [x] Lista de caixas prontas: `GET /api/v1/expedition/ready` — `expedition.py`
+- [x] Impressora: modos `dry_run` / `raw` (TCP 9100) / `cups` — `zpl_printer.py` · env `ZPL_PRINT_MODE`
+- [x] Aba **Expedição** no rail `/app` (HTML + campo scanner) — `web_ui.py`
+- [x] JavaScript da aba expedição (`refreshExpeditionPanel`, `submitExpeditionScan`, Enter no scanner) — `web_ui.py`
+- [ ] Impressão física em bancada (Zebra/Elgin) com `ZPL_PRINT_MODE=raw` ou `cups` configurado
+- [ ] Teste operacional: bipar caixa real → etiqueta na impressora
+
+**Referências:** `docs/LABELS_ML.md` § Etapa 4 · `POST /expedition/arm/{id}` para testes sem Etapa 3.
 
 ---
 
 > [!NOTE]
 > Você reparou que a ETAPA 1 (que é o trabalho humano do técnico) é totalmente isolada das ETAPAS 2 e 3 (que são burocráticas)? Isso garante que se a Sefaz ou o Bling caírem, a sua oficina continua montando computadores sem parar.
+
+---
+
+## Próximos focos sugeridos (ordem)
+
+1. **Etapa 4 — bancada:** configurar `ZPL_PRINT_MODE=raw` (ou `cups`) e testar bipagem → impressora física
+2. **Etapa 2 — homologação:** credenciais Bling + primeiro push/NF-e real com flags liberadas
+3. **Etapa 3 — deploy:** URL pública do webhook + teste SEFAZ → ZPL engatilhado de ponta a ponta
+4. **Etapa 1 — auth:** login/sessão JWT (substituir seletor local de operador)

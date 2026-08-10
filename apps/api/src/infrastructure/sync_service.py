@@ -30,6 +30,10 @@ from src.infrastructure.ml_feed_client import (
     MLFeedClientError,
     ml_feed_client,
 )
+from src.infrastructure.native_queues import (
+    is_personal_status_id,
+    is_personal_status_name,
+)
 
 # Paginação completa (~8k pedidos): 50/página. Enrich detalhe/shipment só no lote recente.
 ENRICH_ORDERS_LIMIT = 40
@@ -991,6 +995,12 @@ class MLFeedSyncService:
             if use_bl_statuses and not preserved_bl:
                 use_bl_statuses = False
 
+            preserved_personal_statuses = [
+                {"id": s.id, "name": s.name, "color": s.color}
+                for s in existing_status_rows
+                if is_personal_status_id(s.id) or is_personal_status_name(s.name)
+            ]
+
             await session.execute(delete(RealOrderStatusDB))
             # Preserva pickup local (Etapa 1) antes do replace — sync não pode apagar vínculo operador/fila
             existing_order_rows = (
@@ -1060,9 +1070,53 @@ class MLFeedSyncService:
                 stats["statuses_synced"] = len(STATUS_CATALOG)
                 stats["statuses_source"] = "ml_catalog"
 
+            if preserved_personal_statuses:
+                present_ids = {
+                    int(s["id"])
+                    for s in (preserved_bl if use_bl_statuses else [])
+                }
+                if not use_bl_statuses:
+                    present_ids |= {sid for sid, _, _ in STATUS_CATALOG}
+                # IDs already reinserted this session (BL branch may include personal rows)
+                present_ids |= {
+                    int(getattr(obj, "id", 0) or 0)
+                    for obj in session.new
+                    if isinstance(obj, RealOrderStatusDB)
+                }
+                restored = 0
+                for ps in preserved_personal_statuses:
+                    pid = int(ps["id"])
+                    if pid in present_ids:
+                        continue
+                    session.add(
+                        RealOrderStatusDB(
+                            id=ps["id"],
+                            name=ps["name"],
+                            color=ps["color"],
+                            count=0,
+                        )
+                    )
+                    present_ids.add(pid)
+                    restored += 1
+                if restored:
+                    stats["statuses_synced"] = int(stats.get("statuses_synced") or 0) + restored
+                stats["personal_statuses_preserved"] = len(preserved_personal_statuses)
+                stats["personal_statuses_restored"] = restored
+
             for o in normalized_orders:
+                oid = str(o.get("id") or "")
+                saved = pickup_by_id.get(oid)
+                if saved:
+                    o["picked_by"] = saved["picked_by"]
+                    o["picked_by_id"] = saved["picked_by_id"]
+                    o["picked_from_status_id"] = saved["picked_from_status_id"]
+                    o["picked_from_status_name"] = saved["picked_from_status_name"]
+                    o["picked_at"] = saved["picked_at"]
+                    o["status_id"] = saved["status_id"]
+                    o["status_name"] = saved["status_name"]
                 session.add(RealOrderDB(**o))
             stats["orders_synced"] = len(normalized_orders)
+            stats["pickup_preserved"] = len(pickup_by_id)
 
             for p in normalized_items:
                 session.add(RealProductDB(**p))

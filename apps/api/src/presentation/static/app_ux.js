@@ -28,7 +28,7 @@
 
   /**
    * @param {string} message
-   * @param {'success'|'error'|'info'} [kind]
+   * @param {'success'|'error'|'info'|'warning'} [kind]
    * @param {{label:string,onClick?:Function}[]} [actions]
    */
   function showToast(message, kind, actions) {
@@ -38,7 +38,11 @@
       return;
     }
     var type = kind || 'info';
+    if (type !== 'success' && type !== 'error' && type !== 'info' && type !== 'warning') {
+      type = 'info';
+    }
     el.className = 'app-toast ' + type + ' show';
+    el.setAttribute('role', type === 'error' || type === 'warning' ? 'alert' : 'status');
     var html = '<div style="flex:1;"><div>' + escapeHtml(message) + '</div>';
     if (actions && actions.length) {
       html += '<div class="toast-actions">';
@@ -63,7 +67,32 @@
       });
     }
     if (_toastTimer) clearTimeout(_toastTimer);
-    _toastTimer = setTimeout(hideToast, actions && actions.length ? 12000 : 4500);
+    var hold = actions && actions.length ? 12000 : type === 'error' || type === 'warning' ? 7000 : 4500;
+    _toastTimer = setTimeout(hideToast, hold);
+  }
+
+  /** Mensagens honestas para ações ainda não ligadas à API (Nielsen #1 e #5). */
+  var STUB_ACTION_LABELS = {
+    star: 'Favoritar pedidos',
+    flag: 'Sinalizar pedidos',
+    email: 'Enviar e-mail / WhatsApp',
+    print: 'Imprimir etiquetas',
+    ship: 'Despachar pacotes',
+    filter: 'Filtro avançado',
+    sort: 'Ordenar por preço',
+  };
+
+  function notifyStub(action, selCount) {
+    var label = STUB_ACTION_LABELS[action] || ('Ação "' + action + '"');
+    var n = typeof selCount === 'number' ? selCount : 0;
+    var extra =
+      n > 0
+        ? ' (' + n + ' pedido(s) selecionado(s) — seleção mantida).'
+        : '. Selecione pedidos quando a função estiver disponível.';
+    showToast(
+      label + ' ainda não está disponível nesta versão' + extra,
+      'warning'
+    );
   }
 
   function friendlyHttpError(err, res) {
@@ -157,6 +186,24 @@
   var CLEAR_FILTER_TIP =
     'Dica: use Limpar filtro / Limpar filtros para voltar à lista completa do cache local.';
 
+  /** Empty state inline para tbody de tabela (Nielsen #1 / #6). */
+  function emptyTableRowHtml(colspan, title, hint) {
+    var c = colspan || 7;
+    var t = title || 'Nenhum pedido nesta visão.';
+    var h = hint || CLEAR_FILTER_TIP;
+    return (
+      '<tr class="empty-row"><td colspan="' +
+      c +
+      '" style="text-align:center;padding:28px 16px;">' +
+      '<div style="font-weight:700;color:#E2E8F0;">' +
+      escapeHtml(t) +
+      '</div>' +
+      '<p style="margin:8px 0 0;font-size:0.78rem;color:#94A3B8;line-height:1.4;max-width:420px;margin-left:auto;margin-right:auto;">' +
+      escapeHtml(h) +
+      '</p></td></tr>'
+    );
+  }
+
   function emptyFilterHtml(opts) {
     opts = opts || {};
     var title = opts.title || 'Nenhum resultado neste filtro.';
@@ -217,7 +264,10 @@
     confirmDestructive: confirmDestructive,
     CLEAR_FILTER_TIP: CLEAR_FILTER_TIP,
     emptyFilterHtml: emptyFilterHtml,
+    emptyTableRowHtml: emptyTableRowHtml,
     syncListEmptyStates: syncListEmptyStates,
+    STUB_ACTION_LABELS: STUB_ACTION_LABELS,
+    notifyStub: notifyStub,
   };
 
   // Aliases globais compatíveis com o inline de /app (não sobrescreve se já existir).

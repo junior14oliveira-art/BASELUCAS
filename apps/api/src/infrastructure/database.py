@@ -1,4 +1,5 @@
 import os
+import asyncio
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy import String, Float, Integer, DateTime, Text, Boolean, JSON
@@ -55,7 +56,7 @@ class RealOrderDB(Base):
     bling_last_error: Mapped[str] = mapped_column(Text, default="")
     bling_pushed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     # Gatilho Logística (Etapa 3) — chave NF-e + ZPL engatilhado
-    nfe_access_key: Mapped[str] = mapped_column(String(60), default="")
+    nfe_access_key: Mapped[str] = mapped_column(String(64), default="")
     ml_billing_inject_status: Mapped[str] = mapped_column(String(50), default="")  # pending|ok|gated_read_only|error
     zpl_status: Mapped[str] = mapped_column(String(50), default="")  # pending|ready|gated|error
     zpl_path: Mapped[str] = mapped_column(String(500), default="")
@@ -63,7 +64,6 @@ class RealOrderDB(Base):
     # Etapa 3 engatilha ZPL; Etapa 4 só lê e imprime
     zpl_armed: Mapped[bool] = mapped_column(Boolean, default=False)
     zpl_content: Mapped[str] = mapped_column(Text, default="")
-    nfe_access_key: Mapped[str] = mapped_column(String(64), default="")
     zpl_printed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 class RealProductDB(Base):
@@ -251,18 +251,25 @@ class BlingNfeWebhookEventDB(Base):
     processed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
+_init_db_lock = asyncio.Lock()
+_db_initialized = False
+
+
 async def init_db():
-    async with engine.begin() as conn:
-        try:
-            await conn.run_sync(Base.metadata.create_all)
-        except Exception as e:
-            # Concurrent create_all under --reload can race on new tables.
-            if "already exists" not in str(e).lower():
-                raise
-        # SQLite create_all não adiciona colunas novas em tabelas já existentes.
-        await conn.run_sync(_ensure_real_products_columns)
-        await conn.run_sync(_ensure_real_orders_columns)
-        await conn.run_sync(_ensure_bling_config_columns)
+    global _db_initialized
+    async with _init_db_lock:
+        async with engine.begin() as conn:
+            try:
+                await conn.run_sync(Base.metadata.create_all)
+            except Exception as e:
+                # Concurrent create_all under --reload can race on new tables.
+                if "already exists" not in str(e).lower():
+                    raise
+            # SQLite create_all não adiciona colunas novas em tabelas já existentes.
+            await conn.run_sync(_ensure_real_products_columns)
+            await conn.run_sync(_ensure_real_orders_columns)
+            await conn.run_sync(_ensure_bling_config_columns)
+        _db_initialized = True
 
 
 class OperatorDB(Base):
@@ -332,6 +339,10 @@ def _ensure_real_orders_columns(sync_conn) -> None:
             ("bling_status", "ALTER TABLE real_orders ADD COLUMN bling_status VARCHAR(50) DEFAULT ''"),
             ("bling_last_error", "ALTER TABLE real_orders ADD COLUMN bling_last_error TEXT DEFAULT ''"),
             ("bling_pushed_at", "ALTER TABLE real_orders ADD COLUMN bling_pushed_at DATETIME"),
+            ("ml_billing_inject_status", "ALTER TABLE real_orders ADD COLUMN ml_billing_inject_status VARCHAR(50) DEFAULT ''"),
+            ("zpl_status", "ALTER TABLE real_orders ADD COLUMN zpl_status VARCHAR(50) DEFAULT ''"),
+            ("zpl_path", "ALTER TABLE real_orders ADD COLUMN zpl_path VARCHAR(500) DEFAULT ''"),
+            ("zpl_ready_at", "ALTER TABLE real_orders ADD COLUMN zpl_ready_at DATETIME"),
             ("zpl_armed", "ALTER TABLE real_orders ADD COLUMN zpl_armed BOOLEAN DEFAULT 0"),
             ("zpl_content", "ALTER TABLE real_orders ADD COLUMN zpl_content TEXT DEFAULT ''"),
             ("nfe_access_key", "ALTER TABLE real_orders ADD COLUMN nfe_access_key VARCHAR(64) DEFAULT ''"),

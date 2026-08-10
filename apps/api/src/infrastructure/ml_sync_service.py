@@ -7,6 +7,7 @@ a fonte usada pelo dashboard e pelos agentes.
 
 import json
 import time
+import asyncio
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -50,14 +51,58 @@ async def build_client(account: MLAccountDB) -> MercadoLivreClient:
     )
 
 
+async def auto_import_account_from_bridge() -> Optional[MLAccountDB]:
+    """Puxa o token já autenticado no servidor online (Render) e o salva na base SQLite local."""
+    url = getattr(settings, "ML_FEED_TOKEN_URL", "https://fourmc-market-api.onrender.com/api/base-antigravity/ml/token")
+    if not url:
+        return None
+    try:
+        import httpx
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            res = await client.get(url)
+            if res.status_code == 200:
+                data = res.json()
+                if data.get("success") and data.get("access_token") and data.get("ml_user_id"):
+                    async with async_session() as session:
+                        ml_user_id = int(data["ml_user_id"])
+                        result = await session.execute(
+                            select(MLAccountDB).where(MLAccountDB.ml_user_id == ml_user_id)
+                        )
+                        account = result.scalars().first()
+                        if not account:
+                            account = MLAccountDB(ml_user_id=ml_user_id)
+                            session.add(account)
+                        account.nickname = data.get("nickname") or "ML"
+                        account.access_token = data.get("access_token")
+                        account.refresh_token = data.get("refresh_token") or ""
+                        exp = data.get("expires_at")
+                        if isinstance(exp, (int, float)):
+                            account.expires_at = float(exp)
+                        else:
+                            account.expires_at = time.time() + 21600
+                        account.is_active = True
+                        await session.commit()
+                        # Recarrega a conta limpa do banco
+                        res_acc = await session.execute(select(MLAccountDB).where(MLAccountDB.id == account.id))
+                        return res_acc.scalars().first()
+    except Exception as e:
+        print(f"[ML-Sync] Aviso ao importar token automático do servidor online: {e}")
+    return None
+
+
 async def get_account(ml_user_id: Optional[int] = None) -> Optional[MLAccountDB]:
-    """Retorna a conta pedida ou, sem argumento, a primeira conta ativa."""
+    """Retorna a conta pedida ou, sem argumento, a primeira conta ativa. Tenta o auto-import do servidor online se não houver."""
     async with async_session() as session:
         query = select(MLAccountDB).where(MLAccountDB.is_active == True)  # noqa: E712
         if ml_user_id:
             query = query.where(MLAccountDB.ml_user_id == ml_user_id)
         result = await session.execute(query)
-        return result.scalars().first()
+        account = result.scalars().first()
+        if account and account.access_token:
+            return account
+    
+    # Fallback automático: importar o token ativo da conta de produção (Render)
+    return await auto_import_account_from_bridge()
 
 
 class MercadoLivreSyncService:
@@ -80,6 +125,9 @@ class MercadoLivreSyncService:
         scroll_id: Optional[str] = None
 
         while len(item_ids) < max_items:
+            # Respeita Rate Limit do ML (evita 429 Too Many Requests)
+            await asyncio.sleep(0.35)
+            
             page = await client.scan_user_items(status=status, scroll_id=scroll_id, limit=100)
             results = page.get("results", [])
             if not results:
@@ -152,6 +200,9 @@ class MercadoLivreSyncService:
         orders: List[Dict[str, Any]] = []
         offset = 0
         while len(orders) < max_orders:
+            # Respeita Rate Limit do ML (evita 429 Too Many Requests)
+            await asyncio.sleep(0.35)
+            
             page = await client.search_orders(
                 status=status, date_from=date_from, limit=50, offset=offset
             )

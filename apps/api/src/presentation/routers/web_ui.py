@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select, func
-from src.infrastructure.database import async_session, RealOrderStatusDB, RealOrderDB, RealProductDB, OperatorDB
+from src.infrastructure.database import async_session, RealOrderStatusDB, RealOrderDB, RealProductDB, OperatorDB, init_db
 from src.presentation.routers.operators import seed_operators_if_empty
 from src.config import settings
 import json
@@ -18,6 +18,7 @@ async def root_redirect():
 @router.get("/app", response_class=HTMLResponse)
 @router.get("/dashboard-ui", response_class=HTMLResponse)
 async def get_web_ui():
+    await init_db()
     async with async_session() as session:
         # 1. Seed & Fetch Operators
         await seed_operators_if_empty()
@@ -57,6 +58,12 @@ async def get_web_ui():
                 "date": o.created_at.strftime("%d/%m/%Y %H:%M") if o.created_at else "",
                 "shipping_status": getattr(o, "shipping_status", "") or "ready_to_ship",
                 "marketplace_fee": getattr(o, "marketplace_fee", 0.0) or 0.0,
+                "zpl_armed": bool(getattr(o, "zpl_armed", False)) or (getattr(o, "zpl_status", "") or "") == "ready",
+                "shipping_id": getattr(o, "shipping_id", "") or "",
+                "tracking_number": getattr(o, "tracking_number", "") or "",
+                "picked_by": getattr(o, "picked_by", "") or "",
+                "picked_by_id": int(getattr(o, "picked_by_id", 0) or 0),
+                "picked_from_status_name": getattr(o, "picked_from_status_name", "") or "",
             })
 
         # 4. Fetch Real Products from Database
@@ -190,6 +197,12 @@ async def get_web_ui():
     .status-pill {{ display: inline-block; padding: 4px 10px; border-radius: 4px; color: #FFF; font-size: 0.72rem; font-weight: 700; }}
     .carrier-tag {{ display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 0.68rem; font-weight: 700; }}
 
+    /* Filtro de período do dashboard */
+    .dash-period-btn {{ background: transparent; color: var(--text-muted); border: 1px solid var(--border); padding: 6px 14px; border-radius: 6px; font-size: 0.78rem; font-weight: 700; cursor: pointer; transition: all 0.15s; font-family: inherit; }}
+    .dash-period-btn:hover {{ border-color: var(--primary); color: var(--primary); background: var(--blue-light); }}
+    .dash-period-btn:focus-visible {{ outline: 2px solid var(--primary); outline-offset: 2px; }}
+    .dash-period-btn.active {{ background: var(--primary); color: #FFF; border-color: var(--primary); }}
+
     .kpi-grid {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }}
     .kpi-title {{ font-size: 0.72rem; font-family: 'JetBrains Mono', monospace; font-weight: 700; color: var(--text-muted); text-transform: uppercase; margin-bottom: 8px; }}
     .kpi-value {{ font-size: 1.5rem; font-weight: 800; color: #FFF; }}
@@ -206,8 +219,31 @@ async def get_web_ui():
     .app-toast.success {{ border-color: #10B981; }}
     .app-toast.error {{ border-color: #F43F5E; }}
     .app-toast.info {{ border-color: #38BDF8; }}
+    .app-toast.warning {{ border-color: #F59E0B; background: #292524; }}
     .app-toast .toast-actions {{ margin-top: 8px; display: flex; gap: 8px; }}
     .app-toast .toast-actions button {{ background: rgba(255,255,255,0.08); border: 1px solid var(--border); color: #FFF; border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 0.75rem; font-weight: 700; }}
+    .expedition-scan-wrap {{ display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }}
+    .expedition-scan-input {{ width: 100%; max-width: 520px; padding: 14px 18px; font-size: 1.15rem; font-weight: 700; font-family: 'JetBrains Mono', monospace; letter-spacing: 0.04em; border-radius: 10px; border: 2px solid #22a564; background: #0F172A; color: #FFF; outline: none; box-shadow: 0 0 0 3px rgba(34,165,100,0.15); }}
+    .expedition-scan-input:focus {{ border-color: #38BDF8; box-shadow: 0 0 0 3px rgba(56,189,248,0.2); }}
+    .expedition-badge-ready {{ background: rgba(34,165,100,0.2); color: #34D399; border: 1px solid rgba(34,165,100,0.4); font-size: 0.72rem; font-weight: 800; padding: 3px 8px; border-radius: 12px; }}
+    .expedition-badge-wait {{ background: rgba(234,134,77,0.15); color: #FBBF24; border: 1px solid rgba(234,134,77,0.35); font-size: 0.72rem; font-weight: 800; padding: 3px 8px; border-radius: 12px; }}
+    .tutorial-badge {{ display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:12px; font-size:0.72rem; font-weight:800; }}
+    .tutorial-badge.green {{ background:rgba(34,165,100,0.18); color:#34D399; border:1px solid rgba(34,165,100,0.4); }}
+    .tutorial-badge.amber {{ background:rgba(234,134,77,0.15); color:#FBBF24; border:1px solid rgba(234,134,77,0.35); }}
+    .tutorial-badge.rose {{ background:rgba(213,72,57,0.15); color:#FB7185; border:1px solid rgba(213,72,57,0.35); }}
+    .pipeline-flow {{ display:flex; flex-wrap:wrap; gap:10px; align-items:stretch; margin-top:14px; }}
+    .pipeline-col {{ flex:1; min-width:220px; background:#14171d; border:1px solid var(--border); border-radius:8px; padding:14px; }}
+    .pipeline-node {{ background:#0F172A; border:1px solid var(--border); border-radius:8px; padding:10px 12px; margin-bottom:8px; font-size:0.8rem; font-weight:700; color:#E2E8F0; }}
+    .pipeline-node.ml {{ border-color:#FFE600; color:#FFE600; }}
+    .pipeline-node.fiscal {{ border-color:#00C7B1; }}
+    .pipeline-node.kanban {{ border-color:#38BDF8; }}
+    .pipeline-node.conv {{ border-color:#F59E0B; }}
+    .pipeline-node.done {{ border-color:#10B981; color:#34D399; }}
+    .pipeline-arrow {{ display:flex; align-items:center; justify-content:center; color:var(--text-muted); font-size:1.2rem; font-weight:800; min-width:24px; }}
+    .tutorial-step {{ display:flex; gap:12px; padding:12px 0; border-bottom:1px solid var(--border); }}
+    .tutorial-step:last-child {{ border-bottom:none; }}
+    .tutorial-step-num {{ flex-shrink:0; width:28px; height:28px; border-radius:50%; background:#0066FF; color:#FFF; display:flex; align-items:center; justify-content:center; font-size:0.8rem; font-weight:800; }}
+    .roadmap-row {{ display:flex; gap:14px; align-items:flex-start; padding:14px; background:#14171d; border:1px solid var(--border); border-radius:8px; margin-bottom:10px; }}
   </style>
 </head>
 <body>
@@ -228,6 +264,13 @@ async def get_web_ui():
     <div class="rail-item" id="rail-products" title="Inventário & Produtos" onclick="switchTab('products', this)">
       <span class="material-icons">inventory_2</span>
     </div>
+    <div class="rail-item" id="rail-users" title="Usuários / Equipe" onclick="switchTab('users', this)">
+      <span class="material-icons">groups</span>
+    </div>
+    <div class="rail-item" id="rail-expedition" title="Expedição — Bipagem & Etiquetas ZPL" onclick="switchTab('expedition', this)">
+      <span class="material-icons">qr_code_scanner</span>
+      <span class="rail-tag" style="background:#22a564; color:#FFF; font-size:0.55rem; margin-top:2px;">PACK</span>
+    </div>
     <div class="rail-item" id="rail-automations" title="Automações SE / ENTÃO" onclick="switchTab('automations', this)">
       <span class="material-icons">bolt</span>
     </div>
@@ -237,12 +280,9 @@ async def get_web_ui():
     <div class="rail-item" id="rail-integrations" title="Mapa de Integrações" onclick="switchTab('integrations', this)">
       <span class="material-icons">extension</span>
     </div>
-
-    <div style="margin-top:auto; display:flex; flex-direction:column; align-items:center; gap:6px;">
-      <div class="rail-tag" onclick="filterByChannel('All')">All</div>
-      <div class="rail-tag" onclick="filterByChannel('Mercado Livre')">ML</div>
-      <div class="rail-tag" onclick="filterByChannel('Shopee')">Sh</div>
-      <div class="rail-tag" onclick="filterByChannel('Amazon')">Am</div>
+    <div class="rail-item" id="rail-tutorials" title="Tutoriais — Pipeline & Como usar" onclick="switchTab('tutorials', this)">
+      <span class="material-icons">menu_book</span>
+      <span class="rail-tag" style="background:#F59E0B; color:#111; font-size:0.55rem; margin-top:2px;">HELP</span>
     </div>
   </div>
 
@@ -256,11 +296,11 @@ async def get_web_ui():
           <span style="color:#0066FF;">Base</span> Lucas
         </div>
         <div class="top-readonly-badge">
-          <span class="material-icons" style="font-size:14px;">lock</span> Somente leitura — em construção
+          <span class="material-icons" style="font-size:14px;">lock</span> Cache local ML — leitura
         </div>
         <div class="search-pill">
           <span class="material-icons" style="color:var(--text-muted); font-size:18px;">search</span>
-          <input type="text" id="global-search" placeholder="Szukaj / Buscar pedido, cliente, SKU..." oninput="filterGlobalData(this.value)">
+          <input type="text" id="global-search" placeholder="Buscar pedido, cliente, SKU..." aria-label="Buscar pedido, cliente ou SKU" oninput="filterGlobalData(this.value)">
         </div>
       </div>
 
@@ -298,13 +338,13 @@ async def get_web_ui():
 
       <div class="action-tools-group">
         <div class="tool-btn" title="Selecionar Todos" onclick="triggerBatchAction('select_all')"><span class="material-icons" style="font-size:18px">check_box</span></div>
-        <div class="tool-btn" title="Favoritar" onclick="triggerBatchAction('star')"><span class="material-icons" style="font-size:18px">star_outline</span></div>
-        <div class="tool-btn" title="Sinalizar" onclick="triggerBatchAction('flag')"><span class="material-icons" style="font-size:18px">flag</span></div>
-        <div class="tool-btn" title="Enviar Email / WhatsApp" onclick="triggerBatchAction('email')"><span class="material-icons" style="font-size:18px">mail_outline</span></div>
-        <div class="tool-btn" title="Imprimir Etiquetas (Base.printer)" onclick="triggerBatchAction('print')"><span class="material-icons" style="font-size:18px">print</span></div>
-        <div class="tool-btn" style="background:#0066FF; color:#FFF; border:none;" title="Despachar Pacotes" onclick="triggerBatchAction('ship')"><span class="material-icons" style="font-size:18px">local_shipping</span></div>
-        <div class="tool-btn" title="Filtrar" onclick="triggerBatchAction('filter')"><span class="material-icons" style="font-size:18px">filter_list</span></div>
-        <div class="tool-btn" title="Ordenar por Preço" onclick="triggerBatchAction('sort')"><span class="material-icons" style="font-size:18px">sort</span></div>
+        <div class="tool-btn" title="Favoritar (em breve)" onclick="triggerBatchAction('star')" aria-label="Favoritar — em breve"><span class="material-icons" style="font-size:18px">star_outline</span></div>
+        <div class="tool-btn" title="Sinalizar (em breve)" onclick="triggerBatchAction('flag')" aria-label="Sinalizar — em breve"><span class="material-icons" style="font-size:18px">flag</span></div>
+        <div class="tool-btn" title="E-mail / WhatsApp (em breve)" onclick="triggerBatchAction('email')" aria-label="E-mail — em breve"><span class="material-icons" style="font-size:18px">mail_outline</span></div>
+        <div class="tool-btn" title="Imprimir etiquetas (em breve)" onclick="triggerBatchAction('print')" aria-label="Imprimir etiquetas — em breve"><span class="material-icons" style="font-size:18px">print</span></div>
+        <div class="tool-btn" style="background:#0066FF; color:#FFF; border:none;" title="Despachar pacotes (em breve)" onclick="triggerBatchAction('ship')" aria-label="Despachar — em breve"><span class="material-icons" style="font-size:18px">local_shipping</span></div>
+        <div class="tool-btn" title="Filtro avançado (em breve)" onclick="triggerBatchAction('filter')" aria-label="Filtrar — em breve"><span class="material-icons" style="font-size:18px">filter_list</span></div>
+        <div class="tool-btn" title="Ordenar por preço (em breve)" onclick="triggerBatchAction('sort')" aria-label="Ordenar — em breve"><span class="material-icons" style="font-size:18px">sort</span></div>
       </div>
     </div>
 
@@ -324,43 +364,65 @@ async def get_web_ui():
           <div class="card" style="margin-bottom:20px; background:linear-gradient(90deg, rgba(37,99,235,0.15), rgba(6,182,212,0.1)); border-left:4px solid #0066FF;">
             <div style="display:flex; justify-content:space-between; align-items:center;">
               <div>
-                <strong style="color:#fff; font-size:1rem;">⚡ Painel Executivo BaseLucas (Dashboard de Gráficos)</strong>
-                <div style="font-size:0.8rem; color:var(--text-muted); margin-top:4px;">Indicadores de desempenho, volume diário de vendas e distribuição por fila do BaseLinker.</div>
+                <strong style="color:#fff; font-size:1rem;">Painel executivo Base Lucas</strong>
+                <div style="font-size:0.8rem; color:var(--text-muted); margin-top:4px;">Indicadores do cache local (Mercado Livre / SQLite) e distribuição por fila nativa.</div>
               </div>
-              <button class="btn-add-order" onclick="syncWithBaseLinkerAPI()">
-                <span class="material-icons">sync</span> Atualizar Filas BaseLinker
+              <button class="btn-add-order" onclick="syncWithBaseLinkerAPI()" title="Recarrega a página com o cache SQLite atual">
+                <span class="material-icons">sync</span> Recarregar cache local
               </button>
+            </div>
+          </div>
+
+          <!-- Filtro de período do dashboard -->
+          <div class="card" style="margin-bottom:20px; padding:14px 18px;">
+            <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+              <span style="font-family:'JetBrains Mono',monospace; font-size:0.7rem; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:var(--text-muted);">Vendas de</span>
+              <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                <button class="dash-period-btn active" data-period="total" onclick="setDashPeriod('total', this)">Total</button>
+                <button class="dash-period-btn" data-period="hoje" onclick="setDashPeriod('hoje', this)">Hoje</button>
+                <button class="dash-period-btn" data-period="ontem" onclick="setDashPeriod('ontem', this)">Ontem</button>
+                <button class="dash-period-btn" data-period="7dias" onclick="setDashPeriod('7dias', this)">7 dias</button>
+                <button class="dash-period-btn" data-period="30dias" onclick="setDashPeriod('30dias', this)">30 dias</button>
+                <button class="dash-period-btn" data-period="custom" onclick="setDashPeriod('custom', this)">Personalizado</button>
+              </div>
+              <div id="dash-custom-range" style="display:none; align-items:center; gap:8px;">
+                <label for="dash-date-from" style="font-size:0.75rem; color:var(--text-muted);">De</label>
+                <input type="date" id="dash-date-from" onchange="renderDashboard()" style="background:var(--surface); border:1px solid var(--border); color:var(--text); border-radius:4px; padding:4px 8px; font-size:0.78rem;">
+                <label for="dash-date-to" style="font-size:0.75rem; color:var(--text-muted);">até</label>
+                <input type="date" id="dash-date-to" onchange="renderDashboard()" style="background:var(--surface); border:1px solid var(--border); color:var(--text); border-radius:4px; padding:4px 8px; font-size:0.78rem;">
+              </div>
+              <span id="dash-period-summary" style="margin-left:auto; font-size:0.78rem; color:var(--text-muted);"></span>
             </div>
           </div>
 
           <!-- KPIs Row -->
           <div class="kpi-grid" style="margin-bottom:20px;">
             <div class="card">
-              <div class="kpi-title">STATUSES NO BANCO</div>
-              <div class="kpi-value">{len(statuses_list)} status</div>
-              <span class="badge" style="background:rgba(16,185,129,0.2); color:var(--green); margin-top:8px;">BaseLinker Real IDs</span>
+              <div class="kpi-title">PEDIDOS NO PERÍODO</div>
+              <div class="kpi-value" id="kpi-orders">{len(orders_list)} pedidos</div>
+              <div style="font-size:0.75rem; color:var(--text-muted); margin-top:8px;" id="kpi-orders-hint">Consulta instantânea local</div>
             </div>
             <div class="card">
-              <div class="kpi-title">PEDIDOS GRAVADOS</div>
-              <div class="kpi-value">{len(orders_list)} pedidos</div>
-              <div style="font-size:0.75rem; color:var(--text-muted); margin-top:8px;">Consulta instantânea local</div>
+              <div class="kpi-title">FATURAMENTO NO PERÍODO</div>
+              <div class="kpi-value" id="kpi-revenue">R$ {total_revenue:,.2f}</div>
+              <div style="font-size:0.75rem; color:var(--text-muted); margin-top:8px;" id="kpi-revenue-hint">Soma dos {len(orders_list)} pedidos carregados</div>
+            </div>
+            <div class="card">
+              <div class="kpi-title">TICKET MÉDIO</div>
+              <div class="kpi-value" id="kpi-ticket">—</div>
+              <div style="font-size:0.75rem; color:var(--text-muted); margin-top:8px;">Faturamento ÷ pedidos do período</div>
             </div>
             <div class="card">
               <div class="kpi-title">PRODUTOS NO BANCO</div>
               <div class="kpi-value">{total_products_count} SKUs</div>
-              <div style="font-size:0.75rem; color:var(--text-muted); margin-top:8px;">Total no inventário sincronizado</div>
-            </div>
-            <div class="card">
-              <div class="kpi-title">FATURAMENTO DOS PEDIDOS</div>
-              <div class="kpi-value">R$ {total_revenue:,.2f}</div>
-              <div style="font-size:0.75rem; color:var(--text-muted); margin-top:8px;">Soma dos {len(orders_list)} pedidos carregados</div>
+              <div style="font-size:0.75rem; color:var(--text-muted); margin-top:8px;">{len(statuses_list)} filas · total sincronizado</div>
             </div>
           </div>
 
           <!-- Charts Grid (Apenas os Gráficos no Dashboard) -->
           <div class="dashboard-grid" style="height: 380px;">
             <div class="card" style="display:flex; flex-direction:column;">
-              <h3 style="font-size:0.95rem; font-weight:700; color:#fff; margin-bottom:16px;">📈 Volume de Pedidos por Dia — Últimos 7 dias</h3>
+              <h3 style="font-size:0.95rem; font-weight:700; color:#fff; margin-bottom:16px;">📈 Volume de Pedidos por Dia <span id="chart-period-label" style="font-weight:500; color:var(--text-muted);"></span></h3>
               <div style="flex:1; position:relative;">
                 <canvas id="ordersChart"></canvas>
               </div>
@@ -412,6 +474,7 @@ async def get_web_ui():
                   <th>PREÇO</th>
                   <th>INFORMAÇÕES ADICIONAIS (fila / envio)</th>
                   <th>DATA DO PEDIDO (em status)</th>
+                  <th>AÇÕES</th>
                 </tr>
               </thead>
               <tbody id="orders-table-body">
@@ -487,6 +550,43 @@ async def get_web_ui():
           </div>
         </div>
 
+        <!-- View: Usuários / Equipe (Etapa 1) -->
+        <div id="view-users" style="display:none;">
+          <div class="card">
+            <h3 style="font-size:1.1rem; font-weight:800; color:#fff; margin-bottom:16px; display:flex; align-items:center; gap:8px;">
+              <span class="material-icons" style="color:#0066FF;">groups</span> Usuários / Equipe
+            </h3>
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>NOME</th>
+                  <th>E-MAIL</th>
+                  <th>FUNÇÃO</th>
+                  <th>ATIVO</th>
+                  <th>AÇÕES</th>
+                </tr>
+              </thead>
+              <tbody id="users-team-body">
+                <!-- Rendered via JS -->
+              </tbody>
+            </table>
+            <div style="margin-top:16px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+              <input type="text" id="new-user-name" placeholder="Nome completo" style="flex:1; min-width:160px; padding:8px; border-radius:4px; border:1px solid var(--border); background:var(--bg); color:var(--text);">
+              <input type="email" id="new-user-email" placeholder="E-mail" style="flex:1; min-width:180px; padding:8px; border-radius:4px; border:1px solid var(--border); background:var(--bg); color:var(--text);">
+              <select id="new-user-role" style="padding:8px; border-radius:4px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-weight:600;">
+                <option value="Administrador">Administrador</option>
+                <option value="Técnico (Montagem)" selected>Técnico (Montagem)</option>
+                <option value="Expedição (Separação)">Expedição (Separação)</option>
+              </select>
+              <button class="btn-add-order" onclick="createUserFromTeamTab()">+ Cadastrar usuário</button>
+            </div>
+            <p style="margin-top:12px; font-size:0.82rem;">
+              <a href="#" onclick="openOperatorModal(); return false;" style="color:#38BDF8; font-weight:700; text-decoration:none;">Abrir gestão avançada de operadores (modal)</a>
+            </p>
+          </div>
+        </div>
+
         <!-- View 4: Automations Engine -->
         <div id="view-automations" style="display:none;">
           <div class="card" style="border-left:4px solid var(--amber);">
@@ -545,6 +645,222 @@ async def get_web_ui():
           </div>
         </div>
 
+        <!-- View 7: Expedição — Pick & Pack + Bipagem ZPL (Etapa 4) -->
+        <div id="view-expedition" style="display:none;">
+          <div class="card" style="margin-bottom:16px; border-left:4px solid #22a564;">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
+              <div>
+                <h3 style="font-size:1.05rem; font-weight:800; color:#fff; display:flex; align-items:center; gap:8px;">
+                  <span class="material-icons" style="color:#22a564;">qr_code_scanner</span> Expedição — Bipagem & Impressão ZPL
+                </h3>
+                <p style="font-size:0.82rem; color:var(--text-muted); margin-top:6px; max-width:640px;">
+                  Bipe o código da caixa (scanner USB). O sistema só imprime se a etiqueta estiver engatilhada (Etapa 3).
+                  Falhas de impressora aparecem aqui — sem fingir sucesso.
+                </p>
+              </div>
+              <div style="text-align:right;">
+                <div id="expedition-printer-status" style="font-size:0.78rem; color:var(--text-muted); font-weight:700;">Impressora: carregando…</div>
+                <button type="button" class="btn-add-order" style="margin-top:8px; background:#334155;" onclick="refreshExpeditionPanel()">
+                  <span class="material-icons" style="font-size:16px;">refresh</span> Atualizar fila
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom:16px;">
+            <label for="expedition-scan-input" style="font-size:0.78rem; font-weight:800; color:#94A3B8; text-transform:uppercase;">Campo de bipagem (scanner USB)</label>
+            <div class="expedition-scan-wrap">
+              <input type="text" id="expedition-scan-input" class="expedition-scan-input" autocomplete="off"
+                placeholder="Bipe o pedido / shipping_id / tracking…" aria-label="Bipagem de expedição">
+              <span style="font-size:0.72rem; color:var(--text-muted);">Enter confirma a bipagem. O foco volta automaticamente para este campo.</span>
+            </div>
+          </div>
+
+          <div class="card">
+            <h4 style="font-size:0.9rem; font-weight:800; color:#fff; margin-bottom:12px;">Caixas prontas para bipagem</h4>
+            <table>
+              <thead>
+                <tr>
+                  <th>PEDIDO</th>
+                  <th>CLIENTE</th>
+                  <th>ETIQUETA</th>
+                  <th>STATUS</th>
+                  <th>TESTE</th>
+                </tr>
+              </thead>
+              <tbody id="expedition-ready-body">
+                <tr><td colspan="5" style="color:var(--text-muted); font-size:0.85rem;">Carregando fila…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- View 8: Tutoriais — Pipeline, Roadmap, Como usar -->
+        <div id="view-tutorials" style="display:none;">
+          <div class="card" style="margin-bottom:16px; border-left:4px solid #F59E0B;">
+            <h3 style="font-size:1.1rem; font-weight:800; color:#fff; display:flex; align-items:center; gap:8px;">
+              <span class="material-icons" style="color:#F59E0B;">menu_book</span> Tutoriais — BASE ANTIGRAVITY
+            </h3>
+            <p style="font-size:0.85rem; color:var(--text-muted); margin-top:8px; max-width:720px;">
+              Guia rápido do operador: como o pipeline assíncrono funciona, onde estamos no roadmap e o que fazer (e o que ainda não fazer) no dia a dia.
+              Dados reais vêm do <strong style="color:#FFF;">Mercado Livre via 4M&amp;C + SQLite</strong> — BaseLinker é só molde de tela.
+            </p>
+          </div>
+
+          <div class="card" style="margin-bottom:16px;">
+            <h3 style="font-size:1rem; font-weight:800; color:#fff; margin-bottom:6px; display:flex; align-items:center; gap:8px;">
+              <span class="material-icons" style="color:#38BDF8;">account_tree</span> Pipeline assíncrono 4M&amp;C
+            </h3>
+            <p style="font-size:0.82rem; color:var(--text-muted); margin-bottom:4px;">
+              A venda entra no cache. Em paralelo: o técnico já trabalha no Kanban <em>sem esperar a nota</em>, enquanto o Bling trata a NF-e.
+              Quando a NF é autorizada, o sistema destrava o ZPL. Só então a bipagem imprime a etiqueta.
+            </p>
+            <div class="pipeline-flow">
+              <div class="pipeline-col">
+                <div style="font-size:0.7rem; font-weight:800; color:#FFE600; margin-bottom:8px; text-transform:uppercase;">Entrada</div>
+                <div class="pipeline-node ml">① Venda Mercado Livre</div>
+                <div class="pipeline-arrow">↓</div>
+                <div class="pipeline-node">② SQLite · Fila «Novos pedidos»</div>
+              </div>
+              <div class="pipeline-arrow">⟹</div>
+              <div class="pipeline-col">
+                <div style="font-size:0.7rem; font-weight:800; color:#00C7B1; margin-bottom:8px; text-transform:uppercase;">Fiscal (automático)</div>
+                <div class="pipeline-node fiscal">③ Bling · Pedido de venda</div>
+                <div class="pipeline-arrow">↓</div>
+                <div class="pipeline-node fiscal">④ NF-e autorizada (SEFAZ)</div>
+                <div class="pipeline-arrow">↓</div>
+                <div class="pipeline-node fiscal">⑤ ZPL Mercado Envios engatilhado</div>
+              </div>
+              <div class="pipeline-arrow">⟹</div>
+              <div class="pipeline-col">
+                <div style="font-size:0.7rem; font-weight:800; color:#38BDF8; margin-bottom:8px; text-transform:uppercase;">Oficina (paralelo)</div>
+                <div class="pipeline-node kanban">③′ Fila Técnico / Montagem</div>
+                <div class="pipeline-arrow">↓</div>
+                <div class="pipeline-node kanban">④′ Em Separação / Pacote</div>
+                <div class="pipeline-arrow">↓</div>
+                <div class="pipeline-node kanban">⑤′ Caixa pronta na bancada</div>
+              </div>
+              <div class="pipeline-arrow">⟹</div>
+              <div class="pipeline-col">
+                <div style="font-size:0.7rem; font-weight:800; color:#F59E0B; margin-bottom:8px; text-transform:uppercase;">Convergência</div>
+                <div class="pipeline-node conv">⑥ Caixa + NF + ZPL</div>
+                <div class="pipeline-arrow">↓</div>
+                <div class="pipeline-node done">⑦ Bipagem → impressão ZPL</div>
+                <div class="pipeline-arrow">↓</div>
+                <div class="pipeline-node done">⑧ Transporte / Despachado</div>
+              </div>
+            </div>
+            <p style="font-size:0.75rem; color:var(--text-muted); margin-top:12px;">
+              Segredo da velocidade: se Bling/SEFAZ atrasarem, a oficina continua. A etiqueta só sai na bipagem quando o ZPL estiver engatilhado.
+            </p>
+          </div>
+
+          <div class="card" style="margin-bottom:16px;">
+            <h3 style="font-size:1rem; font-weight:800; color:#fff; margin-bottom:10px; display:flex; align-items:center; gap:8px;">
+              <span class="material-icons" style="color:#A78BFA;">flag</span> Status do roadmap (Etapas 1–4)
+            </h3>
+            <p style="font-size:0.78rem; color:var(--text-muted); margin-bottom:12px;">Fonte: <code style="color:#38BDF8;">docs/ROADMAP.md</code> + estado atual do código. Badges honestos — não inventamos «concluído».</p>
+
+            <div class="roadmap-row">
+              <span class="tutorial-badge amber">🟡 Em andamento</span>
+              <div>
+                <strong style="color:#FFF;">Etapa 1 — Usuários / roles / pickup</strong>
+                <p style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">CRUD de operadores + seletor no header + pickup no backend. Falta aba Equipe dedicada e botões Pegar/Enviar na tabela.</p>
+              </div>
+            </div>
+            <div class="roadmap-row">
+              <span class="tutorial-badge amber">🟡 Em andamento</span>
+              <div>
+                <strong style="color:#FFF;">Etapa 2 — Bling / NF-e</strong>
+                <p style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">Módulo de conexão (Client ID/Secret, OAuth, push de pedido) existe. Emissão de NF-e ainda <strong style="color:#FBBF24;">gated</strong> (<code>NFE_EMIT_ENABLED=false</code>).</p>
+              </div>
+            </div>
+            <div class="roadmap-row">
+              <span class="tutorial-badge green">🟢 Implementado</span>
+              <div>
+                <strong style="color:#FFF;">Etapa 3 — Webhook + ZPL engatilhado</strong>
+                <p style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">Backend pronto (webhook Bling → unlock → ZPL). Homologação externa (URL pública + ML write) ainda pendente.</p>
+              </div>
+            </div>
+            <div class="roadmap-row">
+              <span class="tutorial-badge amber">🟡 Em andamento</span>
+              <div>
+                <strong style="color:#FFF;">Etapa 4 — Bipagem + impressão</strong>
+                <p style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">API e aba Expedição existem. Use com cuidado: impressão física / CUPS ainda em validação — não trate como fluxo de chão 100% estável.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom:16px;">
+            <h3 style="font-size:1rem; font-weight:800; color:#fff; margin-bottom:10px; display:flex; align-items:center; gap:8px;">
+              <span class="material-icons" style="color:#0066FF;">play_circle</span> Como usar o sistema (operador)
+            </h3>
+
+            <div class="tutorial-step">
+              <div class="tutorial-step-num">1</div>
+              <div>
+                <strong style="color:#FFF;">Atualizar feed Mercado Livre</strong>
+                <p style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">Puxe pedidos/produtos do bridge 4M&amp;C para o SQLite. Rede só nesta ação — a UI lê o cache local.</p>
+                <button type="button" class="btn-add-order" style="margin-top:8px;" data-sync-btn onclick="syncMlFeedFromTutorials()" title="POST /api/v1/orders/sync-now">
+                  <span class="material-icons" style="font-size:16px;">cloud_download</span> Atualizar feed Mercado Livre
+                </button>
+              </div>
+            </div>
+            <div class="tutorial-step">
+              <div class="tutorial-step-num">2</div>
+              <div>
+                <strong style="color:#FFF;">Ver pedidos e filas</strong>
+                <p style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">Rail <strong style="color:#FFF;">carrinho</strong> / tag FILAS → Guia Pedidos com árvore de status à esquerda. Filtre e selecione pedidos na tabela.</p>
+                <button type="button" class="btn-add-order" style="margin-top:8px; background:#334155;" onclick="switchTab('orders', document.getElementById('rail-orders'))">Abrir Pedidos</button>
+              </div>
+            </div>
+            <div class="tutorial-step">
+              <div class="tutorial-step-num">3</div>
+              <div>
+                <strong style="color:#FFF;">Operadores (CRUD) e filas</strong>
+                <p style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">No header: seletor <em>Operador</em> + botão <strong style="color:#FFF;">+ CRUD</strong> para cadastrar técnicos. Pickup Pegar/Enviar existe na API; botões na tabela ainda estão em andamento (Etapa 1).</p>
+                <button type="button" class="btn-add-order" style="margin-top:8px; background:#334155;" onclick="openOperatorModal()">Abrir CRUD operadores</button>
+              </div>
+            </div>
+            <div class="tutorial-step">
+              <div class="tutorial-step-num">4</div>
+              <div>
+                <strong style="color:#FFF;">Conectar Bling</strong>
+                <p style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">Rail Canais → clique no card <strong style="color:#FFF;">Bling ERP</strong> → informe Client ID / Secret (e OAuth ou tokens). Status honestos: Configurado / Aguardando credenciais.</p>
+                <button type="button" class="btn-add-order" style="margin-top:8px; background:#334155;" onclick="switchTab('marketplaces', document.getElementById('rail-marketplaces')); setTimeout(openBlingModal, 80);">Abrir card Bling</button>
+              </div>
+            </div>
+            <div class="tutorial-step">
+              <div class="tutorial-step-num">5</div>
+              <div>
+                <strong style="color:#FFF;">Mercado Livre 4M&amp;C vs ML direto</strong>
+                <p style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">
+                  <strong style="color:#34D399;">4M&amp;C</strong> = feed read-only de pedidos (produção hoje).<br>
+                  <strong style="color:#FFE600;">ML direto</strong> = OAuth App ID/Secret no DevCenter (separado; para etiquetas/writes após homologação).
+                </p>
+                <button type="button" class="btn-add-order" style="margin-top:8px; background:#334155;" onclick="switchTab('marketplaces', document.getElementById('rail-marketplaces'))">Abrir Canais</button>
+              </div>
+            </div>
+            <div class="tutorial-step">
+              <div class="tutorial-step-num">6</div>
+              <div>
+                <strong style="color:#FFF;">Enviar para Bling (NF-e)</strong>
+                <p style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">Selecione pedidos → botão verde na toolbar. Cria/envia pedido de venda no Bling. <strong style="color:#FBBF24;">NF-e real só com NFE_EMIT_ENABLED=true</strong> — hoje costuma ficar bloqueada/gated.</p>
+              </div>
+            </div>
+            <div class="tutorial-step">
+              <div class="tutorial-step-num">7</div>
+              <div>
+                <strong style="color:#FFF;">O que ainda não fazer (produção física)</strong>
+                <p style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">
+                  Não use BaseLinker como fonte de pedidos. Não confie 100% em Pick&amp;Pack/ZPL físico até homologar impressora e webhook.
+                  Aba Expedição é para testes controlados — falhas devem aparecer no toast, sem fingir sucesso.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
       </div>
     </div>
   </div>
@@ -552,11 +868,11 @@ async def get_web_ui():
   <!-- Modal: Alterar Fila / Status -->
   <div class="modal-overlay" id="alter-fila-modal">
     <div class="modal-box">
-      <h3 style="margin-bottom:14px; font-weight:800;">🚩 Alterar Fila / Status do Pedido</h3>
-      <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:16px;">Selecione para qual Fila/Status do BaseLinker você deseja mover o(s) pedido(s):</p>
+      <h3 style="margin-bottom:14px; font-weight:800;">Alterar fila / status do pedido</h3>
+      <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:16px;">Escolha a fila nativa de destino. A alteração fica só nesta sessão até a API de pickup/filas persistir no SQLite — ao recarregar, o cache volta.</p>
       
       <div style="margin-bottom:16px;">
-        <label style="font-size:0.8rem; font-weight:700; color:var(--text-muted);">SELECIONAR NOVA FILA (60 STATUS):</label>
+        <label style="font-size:0.8rem; font-weight:700; color:var(--text-muted);">NOVA FILA (catálogo local):</label>
         <select id="new-status-select" style="width:100%; padding:10px; border-radius:6px; border:1px solid var(--border); background:var(--bg); color:var(--text); margin-top:6px; font-weight:700;">
           <!-- Rendered via JS -->
         </select>
@@ -576,7 +892,11 @@ async def get_web_ui():
       
       <div style="display:flex; gap:10px; margin-bottom:16px;">
         <input type="text" id="new-op-name" placeholder="Nome do Técnico (ex: Técnico Lucas)" style="flex:1; padding:8px; border-radius:4px; border:1px solid var(--border); background:var(--bg); color:var(--text);">
-        <input type="text" id="new-op-role" placeholder="Função (ex: Separação)" style="width:140px; padding:8px; border-radius:4px; border:1px solid var(--border); background:var(--bg); color:var(--text);">
+        <select id="new-op-role" style="width:200px; padding:8px; border-radius:4px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-weight:600;">
+          <option value="Administrador">Administrador</option>
+          <option value="Técnico (Montagem)" selected>Técnico (Montagem)</option>
+          <option value="Expedição (Separação)">Expedição (Separação)</option>
+        </select>
         <button class="btn-add-order" onclick="createOperator()">+ Cadastrar</button>
       </div>
 
@@ -730,8 +1050,12 @@ async def get_web_ui():
     const REAL_PRODUCTS = {products_json};
     let OPERATORS = {operators_json};
 
+    const CANONICAL_ROLES = ["Administrador", "Técnico (Montagem)", "Expedição (Separação)"];
+    let currentOperatorId = null;
+
     let activeStatusFilter = 'Todos os pedidos';
     let activeChannelFilter = 'All';
+    let expeditionPrinterMode = 'dry_run';
     let globalSearchTerm = '';
     let selectedOrderIds = new Set();
 
@@ -752,13 +1076,13 @@ async def get_web_ui():
     }}
 
     function filterByChannel(channel) {{
-      activeChannelFilter = channel;
+      activeChannelFilter = channel || 'All';
       switchTab('orders');
       renderOrdersTable();
     }}
 
     function openOrderModal(mode = 'NEW') {{
-      alert(`[BaseLucas] Adicionar / Editar pedido (${{mode}}).`);
+      _toast('Adicionar / editar pedido manual ainda não está disponível. Os pedidos vêm do sync Mercado Livre.', 'warning');
     }}
 
     function triggerBatchAction(action) {{
@@ -773,8 +1097,7 @@ async def get_web_ui():
       if (action === 'nfe') {{
         const ids = Array.from(selectedOrderIds);
         if (!ids.length) {{
-          if (window.AppUx) AppUx.showToast('Selecione ao menos um pedido.', 'info');
-          else alert('Selecione ao menos um pedido.');
+          _toast('Selecione ao menos um pedido para enviar ao Bling.', 'info');
           return;
         }}
         (async () => {{
@@ -787,13 +1110,15 @@ async def get_web_ui():
             }} catch (e) {{ blocked++; }}
           }}
           const msg = `Bling: ${{ok}} processado(s), ${{blocked}} bloqueado(s)/erro. NF-e só com NFE_EMIT_ENABLED=true.`;
-          if (window.AppUx) AppUx.showToast(msg, ok ? 'success' : 'info');
-          else alert(msg);
+          _toast(msg, ok ? 'success' : 'warning');
         }})();
         return;
       }}
-      const selCount = selectedOrderIds.size;
-      alert(`[BaseLucas] Ação em lote '${{action}}' executada para ${{selCount}} pedido(s) selecionado(s).`);
+      if (window.AppUx && AppUx.notifyStub) {{
+        AppUx.notifyStub(action, selectedOrderIds.size);
+      }} else {{
+        _toast('Esta ação em lote ainda não está disponível.', 'warning');
+      }}
     }}
 
     function toggleSelectAllOrders(checked) {{
@@ -846,6 +1171,10 @@ async def get_web_ui():
         statuses: ["Pedidos Criados", "Notebook - Geral", "Técnico Dayvid", "Técnico Jose Wilsom", "Técnico Luan", "Técnica Maria Luiza", "Técnico Mauricio", "Técnico Pietro", "Ingrid Dorta", "Gabriel", "Gustavo Cleytinho"]
       }},
       {{
+        name: "CHÃO DE FÁBRICA",
+        statuses: ["Fila Técnico"]
+      }},
+      {{
         name: "COMPUTADORES / PC",
         statuses: ["Computadores - Geral", "Técnico Gustavo", "Técnico José Barbosa", "Técnico Thiago"]
       }},
@@ -882,9 +1211,10 @@ async def get_web_ui():
       return '#ea864d';
     }}
 
-    function distribuicaoPorStatus() {{
+    function distribuicaoPorStatus(lista) {{
+      const base = Array.isArray(lista) ? lista : REAL_ORDERS;
       const counts = {{}};
-      REAL_ORDERS.forEach(o => {{
+      base.forEach(o => {{
         counts[o.status] = (counts[o.status] || 0) + 1;
       }});
       const labels = Object.keys(counts);
@@ -892,23 +1222,165 @@ async def get_web_ui():
       return {{ labels, valores }};
     }}
 
-    function initCharts() {{
+    // ---------- Filtro de período do dashboard ----------
+    let dashPeriod = 'total';
+    let ordersChartRef = null;
+    let statusChartRef = null;
+
+    const DASH_PERIOD_LABELS = {{
+      total: 'todo o período',
+      hoje: 'hoje',
+      ontem: 'ontem',
+      '7dias': 'últimos 7 dias',
+      '30dias': 'últimos 30 dias',
+      custom: 'período personalizado'
+    }};
+
+    function startOfDay(d) {{ const x = new Date(d); x.setHours(0, 0, 0, 0); return x; }}
+    function endOfDay(d) {{ const x = new Date(d); x.setHours(23, 59, 59, 999); return x; }}
+
+    // Intervalo real coberto pelo cache — usado quando o recorte volta vazio.
+    function cacheDateRange() {{
+      const datas = REAL_ORDERS.map(o => parseOrderDate(o.date)).filter(Boolean);
+      if (!datas.length) return {{ min: null, max: null }};
+      return {{ min: new Date(Math.min(...datas)), max: new Date(Math.max(...datas)) }};
+    }}
+
+    function dashRange() {{
+      const now = new Date();
+      if (dashPeriod === 'hoje') return {{ from: startOfDay(now), to: endOfDay(now) }};
+      if (dashPeriod === 'ontem') {{
+        const y = new Date(now); y.setDate(y.getDate() - 1);
+        return {{ from: startOfDay(y), to: endOfDay(y) }};
+      }}
+      if (dashPeriod === '7dias') {{
+        const d = new Date(now); d.setDate(d.getDate() - 6);
+        return {{ from: startOfDay(d), to: endOfDay(now) }};
+      }}
+      if (dashPeriod === '30dias') {{
+        const d = new Date(now); d.setDate(d.getDate() - 29);
+        return {{ from: startOfDay(d), to: endOfDay(now) }};
+      }}
+      if (dashPeriod === 'custom') {{
+        const f = document.getElementById('dash-date-from')?.value;
+        const t = document.getElementById('dash-date-to')?.value;
+        return {{
+          from: f ? new Date(f + 'T00:00:00') : null,
+          to: t ? new Date(t + 'T23:59:59') : null
+        }};
+      }}
+      return {{ from: null, to: null }};
+    }}
+
+    function dashFilteredOrders() {{
+      const {{ from, to }} = dashRange();
+      if (!from && !to) return REAL_ORDERS.slice();
+      return REAL_ORDERS.filter(o => {{
+        const od = parseOrderDate(o.date);
+        if (!od) return false;
+        if (from && od < from) return false;
+        if (to && od > to) return false;
+        return true;
+      }});
+    }}
+
+    function setDashPeriod(preset, btn) {{
+      dashPeriod = preset;
+      const custom = document.getElementById('dash-custom-range');
+      if (custom) custom.style.display = (preset === 'custom') ? 'flex' : 'none';
+      document.querySelectorAll('.dash-period-btn').forEach(b => b.classList.remove('active'));
+      if (btn) btn.classList.add('active');
+      renderDashboard();
+    }}
+
+    // Série temporal real: por hora quando o recorte é curto, por dia no resto.
+    function buildOrdersSeries(orders) {{
+      const {{ from, to }} = dashRange();
+      const datas = orders.map(o => parseOrderDate(o.date)).filter(Boolean);
+      const ini = from || (datas.length ? new Date(Math.min(...datas)) : new Date());
+      const fim = to || (datas.length ? new Date(Math.max(...datas)) : new Date());
+      const spanDias = Math.max(1, Math.round((endOfDay(fim) - startOfDay(ini)) / 86400000));
+      const porHora = spanDias <= 1;
+
+      const buckets = new Map();
+      if (porHora) {{
+        for (let h = 0; h < 24; h++) buckets.set(String(h).padStart(2, '0') + 'h', 0);
+      }} else {{
+        const limite = Math.min(spanDias, 60);
+        for (let i = limite - 1; i >= 0; i--) {{
+          const d = new Date(endOfDay(fim)); d.setDate(d.getDate() - i);
+          buckets.set(String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0'), 0);
+        }}
+      }}
+
+      orders.forEach(o => {{
+        const d = parseOrderDate(o.date);
+        if (!d) return;
+        const chave = porHora
+          ? String(d.getHours()).padStart(2, '0') + 'h'
+          : String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0');
+        if (buckets.has(chave)) buckets.set(chave, buckets.get(chave) + 1);
+      }});
+
+      return {{ labels: [...buckets.keys()], valores: [...buckets.values()] }};
+    }}
+
+    function renderDashboard() {{
+      const orders = dashFilteredOrders();
+      const total = orders.reduce((s, o) => s + (Number(o.price) || 0), 0);
+      const ticket = orders.length ? total / orders.length : 0;
+      const brl = v => 'R$ ' + Number(v).toLocaleString('pt-BR', {{ minimumFractionDigits: 2, maximumFractionDigits: 2 }});
+
+      const elOrders = document.getElementById('kpi-orders');
+      const elRevenue = document.getElementById('kpi-revenue');
+      const elTicket = document.getElementById('kpi-ticket');
+      if (elOrders) elOrders.textContent = orders.length + ' pedidos';
+      if (elRevenue) elRevenue.textContent = brl(total);
+      if (elTicket) elTicket.textContent = orders.length ? brl(ticket) : '—';
+
+      const rotulo = DASH_PERIOD_LABELS[dashPeriod] || '';
+      const hintOrders = document.getElementById('kpi-orders-hint');
+      const hintRevenue = document.getElementById('kpi-revenue-hint');
+      if (hintOrders) hintOrders.textContent = 'Recorte: ' + rotulo;
+      if (hintRevenue) hintRevenue.textContent = 'Soma dos ' + orders.length + ' pedidos do recorte';
+
+      const resumo = document.getElementById('dash-period-summary');
+      if (resumo) {{
+        const {{ from, to }} = dashRange();
+        const fmt = d => d ? d.toLocaleDateString('pt-BR') : '';
+        if (!orders.length && REAL_ORDERS.length) {{
+          // Recorte vazio: dizer onde os dados realmente estão, em vez de só mostrar zero.
+          const cache = cacheDateRange();
+          resumo.innerHTML = '<span style="color:var(--amber); font-weight:600;">Nenhum pedido neste recorte.</span> '
+            + 'O cache vai de ' + fmt(cache.min) + ' a ' + fmt(cache.max) + ' — sincronize para trazer vendas recentes.';
+        }} else {{
+          resumo.textContent = (from || to)
+            ? (fmt(from) + ' até ' + fmt(to) + ' · ' + orders.length + ' de ' + REAL_ORDERS.length + ' pedidos')
+            : (REAL_ORDERS.length + ' pedidos no cache');
+        }}
+      }}
+      const chartLabel = document.getElementById('chart-period-label');
+      if (chartLabel) chartLabel.textContent = '— ' + rotulo;
+
+      initCharts(orders);
+    }}
+
+    function initCharts(lista) {{
       const canvas1 = document.getElementById('ordersChart');
       const canvas2 = document.getElementById('statusChart');
       if (!canvas1 || !canvas2) return;
+      const orders = Array.isArray(lista) ? lista : dashFilteredOrders();
 
-      // 1. Line Chart: Pedidos por dia
-      const days = {{
-        "04/08": 12, "05/08": 19, "06/08": 25, "07/08": 42, "08/08": 38, "09/08": 45, "10/08": 50
-      }};
-
-      new Chart(canvas1.getContext('2d'), {{
+      // 1. Line Chart: volume real do recorte selecionado
+      const serie = buildOrdersSeries(orders);
+      if (ordersChartRef) ordersChartRef.destroy();
+      ordersChartRef = new Chart(canvas1.getContext('2d'), {{
         type: 'line',
         data: {{
-          labels: Object.keys(days),
+          labels: serie.labels,
           datasets: [{{
             label: 'Pedidos',
-            data: Object.values(days),
+            data: serie.valores,
             borderColor: '#0066FF',
             backgroundColor: 'rgba(0, 102, 255, 0.15)',
             fill: true,
@@ -921,21 +1393,22 @@ async def get_web_ui():
           maintainAspectRatio: false,
           plugins: {{ legend: {{ display: false }} }},
           scales: {{
-            x: {{ grid: {{ color: 'rgba(255,255,255,0.05)' }}, ticks: {{ color: '#94A3B8' }} }},
-            y: {{ grid: {{ color: 'rgba(255,255,255,0.05)' }}, ticks: {{ color: '#94A3B8' }} }}
+            x: {{ grid: {{ color: 'rgba(255,255,255,0.05)' }}, ticks: {{ color: '#94A3B8', maxTicksLimit: 12 }} }},
+            y: {{ beginAtZero: true, grid: {{ color: 'rgba(255,255,255,0.05)' }}, ticks: {{ color: '#94A3B8', precision: 0 }} }}
           }}
         }}
       }});
 
-      // 2. Doughnut Chart: Distribuição por Status
-      const dist = distribuicaoPorStatus();
-      new Chart(canvas2.getContext('2d'), {{
+      // 2. Doughnut Chart: Distribuição por Status (mesmo recorte)
+      const dist = distribuicaoPorStatus(orders);
+      if (statusChartRef) statusChartRef.destroy();
+      statusChartRef = new Chart(canvas2.getContext('2d'), {{
         type: 'doughnut',
         data: {{
-          labels: dist.labels.length ? dist.labels : ['Sem pedidos'],
+          labels: dist.labels.length ? dist.labels : ['Sem pedidos no período'],
           datasets: [{{
             data: dist.valores.length ? dist.valores : [1],
-            backgroundColor: dist.labels.length ? dist.labels.map(l => getStatusColor(l)) : ['#0066FF'],
+            backgroundColor: dist.labels.length ? dist.labels.map(l => getStatusColor(l)) : ['#334155'],
             borderWidth: 0
           }}]
         }},
@@ -949,6 +1422,32 @@ async def get_web_ui():
       }});
     }}
 
+    function getCurrentOperator() {{
+      if (!currentOperatorId) return null;
+      return OPERATORS.find(o => String(o.id) === String(currentOperatorId)) || null;
+    }}
+
+    function personalQueueLabel(name) {{
+      return `Fila · ${{name}}`;
+    }}
+
+    function buildRoleSelectOptions(selectedRole) {{
+      return CANONICAL_ROLES.map(r =>
+        `<option value="${{r}}"${{r === selectedRole ? ' selected' : ''}}>${{r}}</option>`
+      ).join('');
+    }}
+
+    function applyOrderUpdate(orderId, orderData) {{
+      const idx = REAL_ORDERS.findIndex(o => String(o.id) === String(orderId));
+      if (idx >= 0 && orderData) {{
+        REAL_ORDERS[idx].status_id = orderData.status_id;
+        REAL_ORDERS[idx].status = orderData.status_name;
+        REAL_ORDERS[idx].picked_by = orderData.picked_by || '';
+        REAL_ORDERS[idx].picked_by_id = orderData.picked_by_id || 0;
+        REAL_ORDERS[idx].picked_from_status_name = orderData.picked_from_status_name || '';
+      }}
+    }}
+
     function renderOperatorsDropdown() {{
       const select = document.getElementById('operator-select');
       if (!select) return;
@@ -957,11 +1456,16 @@ async def get_web_ui():
     }}
 
     function switchOperator(opId) {{
+      currentOperatorId = parseInt(opId, 10) || null;
+      try {{ localStorage.setItem('hub_current_operator_id', String(opId)); }} catch(e) {{}}
       const op = OPERATORS.find(o => String(o.id) === String(opId));
       if (op) {{
         document.getElementById('current-user-name').innerText = op.name;
         document.getElementById('user-avatar-initials').innerText = op.name.substring(0, 2).toUpperCase();
       }}
+      renderCategorizedSidebar();
+      renderOrdersTable();
+      renderUsersTeamTable();
     }}
 
     function renderOperatorsCrudList() {{
@@ -981,8 +1485,9 @@ async def get_web_ui():
 
     function createOperator() {{
       const name = document.getElementById('new-op-name').value.trim();
-      const role = document.getElementById('new-op-role').value.trim() || 'Técnico';
-      if (!name) return alert('Digite o nome do operador');
+      const roleEl = document.getElementById('new-op-role');
+      const role = roleEl ? roleEl.value : 'Técnico (Montagem)';
+      if (!name) {{ _toast('Digite o nome do operador.', 'info'); return; }}
 
       fetch('/api/v1/operators', {{
         method: 'POST',
@@ -993,19 +1498,145 @@ async def get_web_ui():
       .then(newOp => {{
         OPERATORS.push(newOp);
         renderOperatorsDropdown();
+        renderUsersTeamTable();
         document.getElementById('new-op-name').value = '';
-        document.getElementById('new-op-role').value = '';
-        alert(`Operador ${{newOp.name}} cadastrado com sucesso!`);
+        if (roleEl) roleEl.value = 'Técnico (Montagem)';
+        _toast('Operador ' + newOp.name + ' cadastrado.', 'success');
+      }})
+      .catch(e => _toast('Não foi possível cadastrar: ' + (e.message || e), 'error'));
+    }}
+
+    async function updateOperator(id, payload) {{
+      const res = await fetch(`/api/v1/operators/${{id}}`, {{
+        method: 'PUT',
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify(payload)
       }});
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || data.message || 'Falha ao atualizar operador');
+      const idx = OPERATORS.findIndex(o => o.id === id);
+      if (idx >= 0) OPERATORS[idx] = {{ ...OPERATORS[idx], ...data }};
+      return data;
+    }}
+
+    function renderUsersTeamTable() {{
+      const tbody = document.getElementById('users-team-body');
+      if (!tbody) return;
+      tbody.innerHTML = OPERATORS.map(o => `
+        <tr>
+          <td><strong>#${{o.id}}</strong></td>
+          <td><strong>${{o.name}}</strong></td>
+          <td style="font-size:0.78rem; color:var(--text-muted);">${{o.email || '—'}}</td>
+          <td>
+            <select id="user-role-${{o.id}}" style="padding:4px 6px; border-radius:4px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-size:0.78rem;" onchange="saveUserRole(${{o.id}}, this.value)">
+              ${{buildRoleSelectOptions(o.role)}}
+            </select>
+          </td>
+          <td>
+            <button style="background:${{o.is_active !== false ? 'rgba(34,165,100,0.2)' : 'rgba(212,72,57,0.2)'}}; color:${{o.is_active !== false ? '#34D399' : '#F87171'}}; border:1px solid var(--border); padding:4px 10px; border-radius:4px; font-size:0.75rem; cursor:pointer; font-weight:700;" onclick="toggleUserActive(${{o.id}})">
+              ${{o.is_active !== false ? 'Ativo' : 'Inativo'}}
+            </button>
+          </td>
+          <td>
+            <button style="background:var(--rose); color:#fff; border:none; padding:4px 8px; border-radius:4px; font-size:0.75rem; cursor:pointer;" onclick="deleteOperator(${{o.id}})">Excluir</button>
+          </td>
+        </tr>
+      `).join('');
+    }}
+
+    async function saveUserRole(id, role) {{
+      try {{
+        await updateOperator(id, {{ role }});
+        renderOperatorsDropdown();
+        renderUsersTeamTable();
+        _toast('Função atualizada.', 'success');
+      }} catch (e) {{
+        _toast('Erro: ' + (e.message || e), 'error');
+        renderUsersTeamTable();
+      }}
+    }}
+
+    async function toggleUserActive(id) {{
+      const op = OPERATORS.find(o => o.id === id);
+      if (!op) return;
+      try {{
+        await updateOperator(id, {{ is_active: !(op.is_active !== false) }});
+        renderOperatorsDropdown();
+        renderUsersTeamTable();
+        _toast('Status do usuário atualizado.', 'success');
+      }} catch (e) {{
+        _toast('Erro: ' + (e.message || e), 'error');
+      }}
+    }}
+
+    function createUserFromTeamTab() {{
+      const name = document.getElementById('new-user-name').value.trim();
+      const email = document.getElementById('new-user-email').value.trim();
+      const roleEl = document.getElementById('new-user-role');
+      const role = roleEl ? roleEl.value : 'Técnico (Montagem)';
+      if (!name) {{ _toast('Digite o nome do usuário.', 'info'); return; }}
+
+      fetch('/api/v1/operators', {{
+        method: 'POST',
+        headers: {{'Content-Type': 'application/json'}},
+        body: JSON.stringify({{ name, role, email }})
+      }})
+      .then(r => r.json())
+      .then(newOp => {{
+        OPERATORS.push(newOp);
+        renderOperatorsDropdown();
+        renderUsersTeamTable();
+        document.getElementById('new-user-name').value = '';
+        document.getElementById('new-user-email').value = '';
+        if (roleEl) roleEl.value = 'Técnico (Montagem)';
+        _toast('Usuário ' + newOp.name + ' cadastrado!', 'success');
+      }})
+      .catch(e => _toast('Erro ao cadastrar: ' + (e.message || e), 'error'));
     }}
 
     function deleteOperator(opId) {{
-      if (!confirm(`Deseja excluir o operador #${{opId}}?`)) return;
+      if (!(window.AppUx && AppUx.confirmDestructive ? AppUx.confirmDestructive('Excluir o operador #' + opId + '? Esta ação não pode ser desfeita.') : confirm('Excluir o operador #' + opId + '?'))) return;
       fetch(`/api/v1/operators/${{opId}}`, {{ method: 'DELETE' }})
-      .then(() => {{
+      .then(r => {{
+        if (!r.ok) return r.json().then(j => {{ throw new Error(j.detail || 'Falha ao excluir'); }});
         OPERATORS = OPERATORS.filter(o => o.id !== opId);
+        if (String(currentOperatorId) === String(opId) && OPERATORS.length) {{
+          switchOperator(OPERATORS[0].id);
+        }}
         renderOperatorsDropdown();
-      }});
+        renderUsersTeamTable();
+        _toast('Operador excluído.', 'info');
+      }})
+      .catch(e => _toast('Erro: ' + (e.message || e), 'error'));
+    }}
+
+    async function orderPickupAction(orderId, action) {{
+      if (!currentOperatorId) {{
+        _toast('Selecione um operador antes de executar esta ação.', 'warning');
+        return;
+      }}
+      const endpoints = {{
+        pickup: `/api/v1/orders/${{encodeURIComponent(orderId)}}/pickup`,
+        send: `/api/v1/orders/${{encodeURIComponent(orderId)}}/send-to-queue`,
+        release: `/api/v1/orders/${{encodeURIComponent(orderId)}}/release`
+      }};
+      const url = endpoints[action];
+      if (!url) return;
+      try {{
+        const res = await fetch(url, {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{ operator_id: currentOperatorId }})
+        }});
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || data.message || 'Ação falhou');
+        if (data.order) applyOrderUpdate(orderId, data.order);
+        _toast(data.message || 'Ação concluída.', 'success');
+        renderCategorizedSidebar();
+        renderOrdersTable();
+      }} catch (e) {{
+        _toast('Erro: ' + (e.message || e), 'error');
+      }}
     }}
 
     function renderCategorizedSidebar() {{
@@ -1019,6 +1650,24 @@ async def get_web_ui():
 
       let html = '';
       const groupedSet = new Set();
+
+      const curOp = getCurrentOperator();
+      if (curOp) {{
+        const pqLabel = personalQueueLabel(curOp.name);
+        const pqCount = REAL_ORDERS.filter(o =>
+          (o.status && o.status.startsWith('Fila ·') && Number(o.picked_by_id) === Number(curOp.id)) ||
+          o.status === pqLabel
+        ).length;
+        const pqActive = activeStatusFilter === pqLabel ? 'active' : '';
+        const safePq = pqLabel.replace(/'/g, "\\'");
+        html += `
+          <div class="status-group-header">
+            <span>MINHA FILA</span> <span>${{pqCount}}</span>
+          </div>
+          <div class="status-tree-item ${{pqActive}}" onclick="filterByStatus('${{safePq}}', this)">
+            <span>${{pqLabel}}</span> <span class="status-badge-count" style="background:#b80af7;">${{pqCount}}</span>
+          </div>`;
+      }}
 
       STATUS_GROUPS.forEach(group => {{
         let groupTotal = 0;
@@ -1089,9 +1738,18 @@ async def get_web_ui():
       const dateTo = document.getElementById('filter-date-to')?.value;
       
       let filtered = REAL_ORDERS.filter(o => {{
-        if (activeStatusFilter !== 'Todos os pedidos' && o.status !== activeStatusFilter) return false;
+        if (activeStatusFilter !== 'Todos os pedidos') {{
+          const op = getCurrentOperator();
+          if (op && activeStatusFilter === personalQueueLabel(op.name)) {{
+            const pq = personalQueueLabel(op.name);
+            if (Number(o.picked_by_id) !== Number(currentOperatorId) && o.status !== pq) return false;
+          }} else if (o.status !== activeStatusFilter) {{
+            return false;
+          }}
+        }}
+
         if (activeChannelFilter && activeChannelFilter !== 'All' && o.channel !== activeChannelFilter) return false;
-        
+
         if (dateFrom) {{
           const dFrom = new Date(dateFrom + 'T00:00:00');
           const od = parseOrderDate(o.date);
@@ -1102,7 +1760,7 @@ async def get_web_ui():
           const od = parseOrderDate(o.date);
           if (od && od > dTo) return false;
         }}
-        
+
         return matchesSearch([o.id, o.external_id, o.customer, o.email, o.phone, o.item, o.sku, o.channel, o.status]);
       }});
       
@@ -1192,7 +1850,24 @@ async def get_web_ui():
           : `Pedidos na Fila: ${{activeStatusFilter}} (${{filtered.length}})`;
       }}
 
-      const rowsHtml = filtered.map(o => `
+      const rowsHtml = filtered.map(o => {{
+        const op = getCurrentOperator();
+        const pq = op ? personalQueueLabel(op.name) : '';
+        const isPickedByMe = currentOperatorId && Number(o.picked_by_id) === Number(currentOperatorId);
+        const inMyQueue = isPickedByMe || (pq && o.status === pq);
+        const hasPickedBy = !!(o.picked_by || '').trim();
+        const showPickup = currentOperatorId && !hasPickedBy && !inMyQueue;
+        const showSend = currentOperatorId && inMyQueue;
+        const showRelease = currentOperatorId && (inMyQueue || hasPickedBy);
+        const actionBtns = [
+          showPickup ? `<button style="background:#0066FF;color:#FFF;border:none;padding:3px 8px;border-radius:4px;font-size:0.68rem;font-weight:700;cursor:pointer;margin:1px;" onclick="orderPickupAction('${{o.id}}','pickup')">Pegar</button>` : '',
+          showSend ? `<button style="background:#22a564;color:#FFF;border:none;padding:3px 8px;border-radius:4px;font-size:0.68rem;font-weight:700;cursor:pointer;margin:1px;" onclick="orderPickupAction('${{o.id}}','send')">Enviar</button>` : '',
+          showRelease ? `<button style="background:#ea864d;color:#FFF;border:none;padding:3px 8px;border-radius:4px;font-size:0.68rem;font-weight:700;cursor:pointer;margin:1px;" onclick="orderPickupAction('${{o.id}}','release')">Liberar</button>` : ''
+        ].filter(Boolean).join(' ');
+        const pickedBadge = o.picked_by
+          ? `<span class="badge" style="background:rgba(184,10,247,0.2); color:#C084FC; font-size:0.65rem; margin-top:3px; display:inline-block;">👤 ${{o.picked_by}}</span>`
+          : '';
+        return `
         <tr>
           <td><input type="checkbox" value="${{o.id}}" ${{selectedOrderIds.has(String(o.id)) ? 'checked' : ''}} onchange="toggleSelectOrder('${{o.id}}', this.checked)"></td>
           <td>
@@ -1207,14 +1882,25 @@ async def get_web_ui():
           <td><strong style="color:#FFF;">${{o.price.toFixed(2)}} R$</strong></td>
           <td>
             <span class="status-pill" style="background:${{getStatusColor(o.status)}}">${{o.status}}</span><br>
+            ${{pickedBadge}}
             <span style="font-size:0.68rem; color:var(--text-muted);">${{o.shipping_status}}</span>
           </td>
           <td>
             <span style="font-size:0.72rem; color:#E2E8F0;">${{o.date}}</span>
           </td>
-        </tr>
-      `).join('');
+          <td>${{actionBtns || '<span style="color:var(--text-muted);font-size:0.68rem;">—</span>'}}</td>
+        </tr>`;
+      }}).join('');
 
+      if (!filtered.length) {{
+        const hint = (globalSearchTerm || activeStatusFilter !== 'Todos os pedidos')
+          ? (window.AppUx && AppUx.CLEAR_FILTER_TIP) || 'Ajuste a busca ou a fila na barra lateral.'
+          : 'Sincronize pedidos do Mercado Livre ou recarregue o cache local.';
+        tbody.innerHTML = (window.AppUx && AppUx.emptyTableRowHtml)
+          ? AppUx.emptyTableRowHtml(8, 'Nenhum pedido nesta visão.', hint)
+          : '<tr><td colspan="8" style="text-align:center;padding:24px;color:#94A3B8;">Nenhum pedido nesta visão.</td></tr>';
+        return;
+      }}
       tbody.innerHTML = rowsHtml;
     }}
 
@@ -1223,9 +1909,13 @@ async def get_web_ui():
 
     function downloadExcel() {{
       const filtered = applyFilters();
-      if (filtered.length === 0) return alert("Nenhum pedido para baixar.");
-      
+      // CSV export: o.customer, o.status, o.date
       let csv = "ID,NOME COMPRADOR,EMAIL,TELEFONE,STATUS,TOTAL,DATA\\n";
+      if (filtered.length === 0) {{
+        _toast('Nenhum pedido para baixar com os filtros atuais.', 'info');
+        return;
+      }}
+      
       filtered.forEach(o => {{
         const row = [
           o.id,
@@ -1331,7 +2021,7 @@ async def get_web_ui():
             <code style="background:rgba(0,102,255,0.15); color:#38BDF8; border:1px solid rgba(0,102,255,0.3); padding:3px 8px; border-radius:6px; font-weight:700; font-size:0.8rem;">${{p.sku || p.id}}</code><br>
             <span style="font-size:0.72rem; color:#94A3B8; display:flex; align-items:center; gap:4px; margin-top:4px;">
               <span>EAN: <strong>${{p.ean}}</strong></span>
-              <button onclick="navigator.clipboard.writeText('${{p.ean}}'); alert('EAN copiado!');" style="background:none; border:none; color:#38BDF8; cursor:pointer; font-size:0.7rem; padding:0;">📋</button>
+              <button type="button" onclick="navigator.clipboard.writeText('${{p.ean}}').then(() => _toast('EAN copiado.', 'success')).catch(() => _toast('Não foi possível copiar o EAN.', 'error'));" style="background:none; border:none; color:#38BDF8; cursor:pointer; font-size:0.7rem; padding:0;" title="Copiar EAN" aria-label="Copiar EAN">📋</button>
             </span>
           </td>
           <td style="vertical-align:middle;">
@@ -1374,24 +2064,32 @@ async def get_web_ui():
       const select = document.getElementById('new-status-select');
       const selectedStatusId = parseInt(select.value);
       const stObj = REAL_STATUSES.find(s => s.id === selectedStatusId);
-      if (!stObj) return;
-
-      if (selectedOrderIds.size === 0 && REAL_ORDERS.length > 0) {{
-        selectedOrderIds.add(REAL_ORDERS[0].id);
+      if (!stObj) {{
+        _toast('Selecione uma fila de destino.', 'info');
+        return;
+      }}
+      if (selectedOrderIds.size === 0) {{
+        _toast('Selecione ao menos um pedido na tabela antes de alterar a fila.', 'info');
+        return;
       }}
 
+      let moved = 0;
       selectedOrderIds.forEach(id => {{
-        const order = REAL_ORDERS.find(o => o.id === id);
+        const order = REAL_ORDERS.find(o => o.id === id || String(o.id) === String(id));
         if (order) {{
           order.status_id = stObj.id;
           order.status = stObj.name;
+          moved++;
         }}
       }});
 
-      alert(`🚩 Fila alterada com sucesso para: '${{stObj.name}}' (#${{stObj.id}})`);
       closeAlterFilaModal();
       renderOrdersTable();
       renderCategorizedSidebar();
+      _toast(
+        moved + ' pedido(s) movido(s) para "' + stObj.name + '" só nesta sessão. Recarregar a página restaura o cache SQLite até a API persistir a fila.',
+        'warning'
+      );
     }}
 
     function openOperatorModal() {{
@@ -1416,16 +2114,66 @@ async def get_web_ui():
       document.getElementById('view-dashboard').style.display = tabName === 'dashboard' ? 'block' : 'none';
       document.getElementById('view-orders').style.display = tabName === 'orders' ? 'block' : 'none';
       document.getElementById('view-products').style.display = tabName === 'products' ? 'block' : 'none';
+      document.getElementById('view-users').style.display = tabName === 'users' ? 'block' : 'none';
       document.getElementById('view-automations').style.display = tabName === 'automations' ? 'block' : 'none';
       document.getElementById('view-marketplaces').style.display = tabName === 'marketplaces' ? 'block' : 'none';
       document.getElementById('view-integrations').style.display = tabName === 'integrations' ? 'block' : 'none';
+      document.getElementById('view-expedition').style.display = tabName === 'expedition' ? 'block' : 'none';
+      const viewTutorials = document.getElementById('view-tutorials');
+      if (viewTutorials) viewTutorials.style.display = tabName === 'tutorials' ? 'block' : 'none';
 
       if (tabName === 'products') renderProductsTable();
+      if (tabName === 'users') renderUsersTeamTable();
+      if (tabName === 'expedition') {{
+        refreshExpeditionPanel();
+        setTimeout(function() {{
+          const inp = document.getElementById('expedition-scan-input');
+          if (inp) inp.focus();
+        }}, 80);
+      }}
     }}
 
-    function syncWithBaseLinkerAPI() {{
-      alert("🔄 Sincronizando filas com a API do BaseLinker...");
-      location.reload();
+    async function syncWithBaseLinkerAPI() {{
+      const btn = document.querySelector('button[onclick="syncWithBaseLinkerAPI()"]');
+      const originalText = btn ? btn.innerHTML : '';
+      if (btn) btn.innerHTML = '<span class="material-icons rotating">sync</span> Sincronizando ML...';
+      _toast('Iniciando sincronização direta com o Mercado Livre...', 'info');
+      try {{
+        const res = await fetch('/api/v1/orders/sync-now', {{ method: 'POST' }});
+        if (!res.ok) throw new Error('Erro ' + res.status);
+        _toast('Sincronização concluída! Recarregando painel...', 'success');
+        setTimeout(() => location.reload(), 1500);
+      }} catch (e) {{
+        _toast('Falha ao sincronizar. Usando cache local.', 'error');
+        if (btn) btn.innerHTML = originalText;
+      }}
+    }}
+    async function syncMlFeedFromTutorials() {{
+      const setBusy = (window.AppUx && AppUx.setBusyButtons) ? AppUx.setBusyButtons : null;
+      if (setBusy) setBusy('[data-sync-btn]', true, 'Sincronizando…');
+      try {{
+        const res = await fetch('/api/v1/orders/sync-now', {{ method: 'POST' }});
+        let data = {{}};
+        try {{ data = await res.json(); }} catch (_) {{}}
+        if (!res.ok) {{
+          const msg = (window.AppUx && AppUx.friendlyHttpError)
+            ? AppUx.friendlyHttpError(res, data)
+            : ('Falha no sync (' + res.status + '). Cache local preservado.');
+          _toast(msg, 'error');
+          return;
+        }}
+        const orders = (data.orders_synced != null) ? data.orders_synced : (data.synced_orders != null ? data.synced_orders : '—');
+        const products = (data.products_synced != null) ? data.products_synced : (data.synced_products != null ? data.synced_products : '—');
+        _toast('Feed ML atualizado. Pedidos: ' + orders + ' · Produtos: ' + products + '. Recarregando…', 'success');
+        setTimeout(function () {{ location.reload(); }}, 900);
+      }} catch (e) {{
+        const msg = (window.AppUx && AppUx.friendlyHttpError)
+          ? AppUx.friendlyHttpError(null, e)
+          : ('Sem conexão com a API. Cache preservado.');
+        _toast(msg, 'error');
+      }} finally {{
+        if (setBusy) setBusy('[data-sync-btn]', false);
+      }}
     }}
 
     function filterGlobalData(val) {{
@@ -1482,7 +2230,7 @@ async def get_web_ui():
       const accessToken = (document.getElementById('bling-access-token') || {{}}).value || '';
       const refreshToken = (document.getElementById('bling-refresh-token') || {{}}).value || '';
       if (!clientId.trim() || !clientSecret.trim()) {{
-        alert('Informe Client ID e Client Secret do app Bling.');
+        _toast('Informe Client ID e Client Secret do app Bling.', 'info');
         return;
       }}
       try {{
@@ -1505,9 +2253,8 @@ async def get_web_ui():
           const data2 = await res2.json();
           if (!res2.ok) throw new Error(data2.detail || data2.message || 'Falha ao salvar tokens');
         }}
-        alert(data.message || 'Credenciais Bling salvas.');
         await refreshBlingCardStatus();
-        _toast('Bling: API salva', 'success');
+        _toast(data.message || 'Credenciais Bling salvas.', 'success');
       }} catch (e) {{
         _toast('Erro ao salvar Bling: ' + (e.message || e), 'error');
       }}
@@ -1530,7 +2277,7 @@ async def get_web_ui():
     }}
 
     async function clearBlingConnection() {{
-      if (!confirm('Limpar tokens Bling desta conta?')) return;
+      if (!(window.AppUx && AppUx.confirmDestructive ? AppUx.confirmDestructive('Limpar tokens Bling desta conta? Você precisará reconectar o OAuth.') : confirm('Limpar tokens Bling desta conta?'))) return;
       try {{
         const res = await fetch('/api/v1/bling/connection', {{ method: 'DELETE' }});
         const data = await res.json();
@@ -1545,6 +2292,108 @@ async def get_web_ui():
       if (window.AppUx && AppUx.showToast) AppUx.showToast(msg, kind || 'info');
       else alert(msg);
     }}
+
+    function _extractApiError(data, fallback) {{
+      if (!data) return fallback || 'Erro desconhecido';
+      if (typeof data.detail === 'string') return data.detail;
+      if (data.detail && data.detail.message) return data.detail.message;
+      if (data.message) return data.message;
+      try {{ return JSON.stringify(data.detail || data); }} catch (e) {{ return fallback || 'Erro'; }}
+    }}
+
+    async function refreshExpeditionPanel() {{
+      const printerEl = document.getElementById('expedition-printer-status');
+      const tbody = document.getElementById('expedition-ready-body');
+      try {{
+        const [printerRes, readyRes] = await Promise.all([
+          fetch('/api/v1/expedition/printer'),
+          fetch('/api/v1/expedition/ready?limit=50')
+        ]);
+        const printer = await printerRes.json();
+        const ready = await readyRes.json();
+        expeditionPrinterMode = (printer.mode || 'dry_run').toLowerCase();
+        if (printerEl) {{
+          const mode = expeditionPrinterMode.toUpperCase();
+          printerEl.innerHTML = 'Modo: <strong style="color:#38BDF8;">' + mode + '</strong> — ' + (printer.ready_hint || '');
+        }}
+        if (!tbody) return;
+        const orders = ready.orders || [];
+        if (!orders.length) {{
+          let html = '<tr><td colspan="5" style="color:var(--text-muted); font-size:0.85rem;">Nenhuma caixa com ZPL engatilhada. Use <em>Engatilhar teste</em> ou aguarde a Etapa 3.</td></tr>';
+          REAL_ORDERS.slice(0, 5).forEach(function(o) {{
+            html += '<tr><td><strong style="color:#38BDF8;">#' + o.id + '</strong></td><td>' + (o.customer || '—') + '</td><td><span class="expedition-badge-wait">Aguardando</span></td><td>' + (o.status || '—') + '</td><td><button type="button" class="btn-add-order" style="padding:4px 10px; font-size:0.72rem;" onclick="armExpeditionTest(\\'' + o.id + '\\')">Engatilhar teste</button></td></tr>';
+          }});
+          tbody.innerHTML = html;
+          return;
+        }}
+        tbody.innerHTML = orders.map(function(o) {{
+          return '<tr><td><strong style="color:#38BDF8;">#' + o.id + '</strong><br><span style="font-size:0.68rem;color:var(--text-muted);">' + (o.shipping_id || o.external_id || '') + '</span></td><td>' + (o.customer || '—') + '</td><td><span class="expedition-badge-ready">Engatilhada</span></td><td>' + (o.status || '—') + '</td><td><button type="button" class="btn-add-order" style="padding:4px 10px; font-size:0.72rem; background:#334155;" onclick="submitExpeditionScan(\\'' + o.id + '\\')">Bipar</button></td></tr>';
+        }}).join('');
+      }} catch (e) {{
+        if (printerEl) printerEl.innerText = 'Impressora: erro ao carregar status';
+        if (tbody) tbody.innerHTML = '<tr><td colspan="5" style="color:#F87171;">Falha ao carregar expedição. API em :8000?</td></tr>';
+        _toast(window.AppUx ? AppUx.friendlyHttpError(e) : (e.message || e), 'error');
+      }}
+    }}
+
+    async function armExpeditionTest(orderId) {{
+      try {{
+        const res = await fetch('/api/v1/expedition/arm/' + encodeURIComponent(orderId), {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{ mark_ready_status: true }})
+        }});
+        const data = await res.json();
+        if (!res.ok) throw new Error(_extractApiError(data, 'Falha ao engatilhar'));
+        _toast(data.message || 'ZPL engatilhada para teste.', 'success');
+        await refreshExpeditionPanel();
+      }} catch (e) {{
+        _toast('Engatilhar teste: ' + (e.message || e), 'error');
+      }}
+    }}
+
+    async function submitExpeditionScan(barcode) {{
+      const code = (barcode || '').trim();
+      if (!code) return;
+      const input = document.getElementById('expedition-scan-input');
+      if (input) input.disabled = true;
+      try {{
+        const payload = {{ barcode: code }};
+        if (expeditionPrinterMode === 'dry_run') payload.dry_run = true;
+        const res = await fetch('/api/v1/expedition/scan', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify(payload)
+        }});
+        const data = await res.json();
+        if (!res.ok) {{
+          _toast(_extractApiError(data, 'Bipagem recusada'), 'error');
+          return;
+        }}
+        const order = data.order || {{}};
+        _toast((data.message || 'Etiqueta impressa.') + ' Pedido #' + (order.id || code), 'success');
+        await refreshExpeditionPanel();
+      }} catch (e) {{
+        _toast(window.AppUx ? AppUx.friendlyHttpError(e) : (e.message || e), 'error');
+      }} finally {{
+        if (input) {{
+          input.disabled = false;
+          input.value = '';
+          input.focus();
+        }}
+      }}
+    }}
+
+    (function bindExpeditionScanner() {{
+      const inp = document.getElementById('expedition-scan-input');
+      if (!inp) return;
+      inp.addEventListener('keydown', function(ev) {{
+        if (ev.key === 'Enter') {{
+          ev.preventDefault();
+          submitExpeditionScan(inp.value);
+        }}
+      }});
+    }})();
 
     async function refreshMlDirectCardStatus() {{
       const el = document.getElementById('ml-direct-card-status');
@@ -1623,8 +2472,22 @@ async def get_web_ui():
     }} catch(e) {{}}
 
     renderOperatorsDropdown();
+    try {{
+      const savedOpId = localStorage.getItem('hub_current_operator_id');
+      const sel = document.getElementById('operator-select');
+      if (savedOpId && OPERATORS.find(o => String(o.id) === String(savedOpId))) {{
+        if (sel) sel.value = savedOpId;
+        switchOperator(savedOpId);
+      }} else if (OPERATORS.length) {{
+        if (sel) sel.value = OPERATORS[0].id;
+        switchOperator(OPERATORS[0].id);
+      }}
+    }} catch(e) {{
+      if (OPERATORS.length) switchOperator(OPERATORS[0].id);
+    }}
     renderCategorizedSidebar();
     renderOrdersTable();
+    renderUsersTeamTable();
 
     let initialTab = 'orders';
     try {{
@@ -1644,7 +2507,7 @@ async def get_web_ui():
     refreshBlingCardStatus();
     refreshMlDirectCardStatus();
 
-    setTimeout(initCharts, 100);
+    setTimeout(renderDashboard, 100);
   </script>
 </body>
 </html>

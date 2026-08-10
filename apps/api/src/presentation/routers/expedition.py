@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException
@@ -49,10 +50,15 @@ def is_zpl_armed(order: RealOrderDB) -> bool:
     """Lê 'etiqueta engatilhada' — colunas Etapa 3/4 ou enrichment_json."""
     if bool(getattr(order, "zpl_armed", False)):
         return True
+    if (getattr(order, "zpl_status", "") or "").strip().lower() == "ready":
+        return True
     enrich = _enrichment_dict(order)
     if enrich.get("zpl_armed") is True or enrich.get("label_armed") is True:
         return True
     if (enrich.get("zpl_content") or enrich.get("zpl") or "").strip():
+        return True
+    zpl_path = (getattr(order, "zpl_path", None) or "").strip()
+    if zpl_path and Path(zpl_path).is_file():
         return True
     return False
 
@@ -61,6 +67,14 @@ def get_zpl_content(order: RealOrderDB) -> str:
     direct = (getattr(order, "zpl_content", None) or "").strip()
     if direct:
         return direct
+    zpl_path = (getattr(order, "zpl_path", None) or "").strip()
+    if zpl_path:
+        path = Path(zpl_path)
+        if path.is_file():
+            try:
+                return path.read_text(encoding="utf-8").strip()
+            except OSError:
+                pass
     enrich = _enrichment_dict(order)
     return (enrich.get("zpl_content") or enrich.get("zpl") or "").strip()
 
@@ -122,6 +136,7 @@ def _order_public(order: RealOrderDB) -> Dict[str, Any]:
         "shipping_id": order.shipping_id or "",
         "tracking_number": order.tracking_number or "",
         "zpl_armed": is_zpl_armed(order),
+        "zpl_status": getattr(order, "zpl_status", "") or "",
         "nfe_access_key": (getattr(order, "nfe_access_key", None) or "")[:8] + "…"
         if (getattr(order, "nfe_access_key", None) or "")
         else "",
@@ -144,15 +159,21 @@ async def list_ready_for_scan(limit: int = 50):
         rows = (
             await session.execute(
                 select(RealOrderDB)
-                .where(RealOrderDB.zpl_armed.is_(True))
+                .where(
+                    or_(
+                        RealOrderDB.zpl_armed.is_(True),
+                        RealOrderDB.zpl_status == "ready",
+                    )
+                )
                 .order_by(RealOrderDB.created_at.desc())
                 .limit(max(1, min(limit, 200)))
             )
         ).scalars().all()
+        ready = [o for o in rows if is_zpl_armed(o)]
         return {
             "ok": True,
-            "total": len(rows),
-            "orders": [_order_public(o) for o in rows],
+            "total": len(ready),
+            "orders": [_order_public(o) for o in ready],
             "printer": zpl_printer.printer_status(),
         }
 
@@ -246,6 +267,8 @@ async def arm_zpl_for_test(order_id: str, payload: ArmPayload = ArmPayload()):
         )
         order.zpl_armed = True
         order.zpl_content = zpl
+        order.zpl_status = "ready"
+        order.zpl_ready_at = datetime.now()
         if payload.nfe_access_key:
             order.nfe_access_key = payload.nfe_access_key.strip()
         if payload.mark_ready_status:

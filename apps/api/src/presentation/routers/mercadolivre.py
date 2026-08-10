@@ -134,8 +134,15 @@ class MLCredentialsBody(BaseModel):
 
 
 async def _hydrate_ml_app_from_db() -> None:
-    """Carrega App ID/Secret salvos via UI (SyncMeta) se .env estiver vazio."""
+    """Carrega App ID/Secret salvos no .env ou SyncMeta se settings em memória estiverem vazios."""
+    import os
     from src.infrastructure.database import SyncMetaDB
+
+    # Só getenv — nunca hardcodar Client ID/Secret no código.
+    if not (settings.ML_CLIENT_ID or "").strip():
+        settings.ML_CLIENT_ID = os.getenv("ML_CLIENT_ID", "")
+    if not (settings.ML_CLIENT_SECRET or "").strip():
+        settings.ML_CLIENT_SECRET = os.getenv("ML_CLIENT_SECRET", "")
 
     await init_db()
     async with async_session() as session:
