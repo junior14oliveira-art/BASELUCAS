@@ -22,7 +22,24 @@ logistics_unlock_service
 | Status local | Quando |
 |---|---|
 | `Aguardando Nota` | Pedido fiscal ainda sem NF-e autorizada |
-| `Pronto para Bipagem` | Chave SEFAZ processada (+ ZPL armado quando download OK) |
+| `NF Recebida` | Chave SEFAZ processada, **mas o ZPL não veio** — ainda não dá para bipar |
+| `Pronto para Bipagem` | Chave SEFAZ processada **e** `zpl_armed=true` — bipagem cumprível |
+| *(fila de produção)* | **Inalterado.** Ver "Quem é dono da fila" abaixo |
+
+## Quem é dono da fila
+
+O pipeline é assíncrono (`docs/PIPELINE_ASSINCRONO.md`): a trilha fiscal e a
+trilha física correm independentes. O webhook **nunca** arranca um pedido do
+chão de fábrica — ele engatilha o ZPL e deixa a fila como está.
+
+`is_in_production(order)` segura o reposicionamento quando:
+
+- `picked_by_id > 0` — algum operador puxou o pedido (Etapa 1), **ou**
+- a fila casa com `PRODUCTION_QUEUE_HINTS` (técnico, separação, montagem, embalagem, pacote)
+
+Nesses casos a resposta traz `status_hold="em_producao"`. O ZPL fica armado e a
+Etapa 4 bipa normalmente quando a caixa chegar na bancada — ela lê `zpl_armed`,
+não o nome da fila.
 
 ## Onde o ZPL fica armazenado / engatilhado
 
@@ -42,7 +59,12 @@ Consulta rápida: `GET /api/v1/orders/{order_id}/logistics`
 - Default **`ML_READ_ONLY=true`**: **não** chama write no ML.  
   Resposta do passo 2: `status=gated_read_only` (documentado no JSON do evento).
 - Chave é gravada no SQLite mesmo assim.
-- Com `LOGISTICS_UNLOCK_ON_NFE_KEY=true` (default), o status local pode ir para **Pronto para Bipagem** sem write no ML — o ZPL só fica `armed` se o GET da etiqueta funcionar.
+- Com `LOGISTICS_UNLOCK_ON_NFE_KEY=true` (default) e **sem** ZPL armado, o status vai
+  para **`NF Recebida`** — nunca para `Pronto para Bipagem`. Prometer bipagem sem
+  etiqueta faria a Etapa 4 devolver `409` na cara do expedidor.
+  A resposta traz `status_hold="sem_zpl"` e `can_scan=false`.
+- **`Pronto para Bipagem` exige `zpl_armed=true`.** Quando o ZPL chega depois,
+  `NF Recebida` → `Pronto para Bipagem` (é fila fiscal, pode ser reposicionada).
 - Homologação write: `ML_READ_ONLY=false` + conta OAuth ML ativa.
 
 Download de etiqueta é **GET** (não é escrita de estoque/preço). Ainda exige OAuth ML e `shipping_id`.

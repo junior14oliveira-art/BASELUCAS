@@ -182,6 +182,10 @@
     }
   }
 
+  /** Tip padrão para empty state com filtros. */
+  var CLEAR_FILTER_TIP =
+    'Dica: use Limpar filtro / Limpar filtros para voltar à lista completa do cache local.';
+
   /** Empty state inline para tbody de tabela (Nielsen #1 / #6). */
   function emptyTableRowHtml(colspan, title, hint) {
     var c = colspan || 7;
@@ -199,10 +203,6 @@
       '</p></td></tr>'
     );
   }
-
-  /** Tip padrão para empty state com filtros. */
-  var CLEAR_FILTER_TIP =
-    'Dica: use Limpar filtro / Limpar filtros para voltar à lista completa do cache local.';
 
   function emptyFilterHtml(opts) {
     opts = opts || {};

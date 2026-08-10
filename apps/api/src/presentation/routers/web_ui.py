@@ -274,6 +274,10 @@ async def get_web_ui():
     <div class="rail-item" id="rail-integrations" title="Mapa de Integrações" onclick="switchTab('integrations', this)">
       <span class="material-icons">extension</span>
     </div>
+    <div class="rail-item" id="rail-tutorials" title="Tutoriais — Pipeline & Como usar" onclick="switchTab('tutorials', this)">
+      <span class="material-icons">menu_book</span>
+      <span class="rail-tag" style="background:#F59E0B; color:#111; font-size:0.55rem; margin-top:2px;">HELP</span>
+    </div>
   </div>
 
   <!-- 2. Main Wrapper -->
@@ -663,6 +667,172 @@ async def get_web_ui():
           </div>
         </div>
 
+        <!-- View 8: Tutoriais — Pipeline, Roadmap, Como usar -->
+        <div id="view-tutorials" style="display:none;">
+          <div class="card" style="margin-bottom:16px; border-left:4px solid #F59E0B;">
+            <h3 style="font-size:1.1rem; font-weight:800; color:#fff; display:flex; align-items:center; gap:8px;">
+              <span class="material-icons" style="color:#F59E0B;">menu_book</span> Tutoriais — BASE ANTIGRAVITY
+            </h3>
+            <p style="font-size:0.85rem; color:var(--text-muted); margin-top:8px; max-width:720px;">
+              Guia rápido do operador: como o pipeline assíncrono funciona, onde estamos no roadmap e o que fazer (e o que ainda não fazer) no dia a dia.
+              Dados reais vêm do <strong style="color:#FFF;">Mercado Livre via 4M&amp;C + SQLite</strong> — BaseLinker é só molde de tela.
+            </p>
+          </div>
+
+          <div class="card" style="margin-bottom:16px;">
+            <h3 style="font-size:1rem; font-weight:800; color:#fff; margin-bottom:6px; display:flex; align-items:center; gap:8px;">
+              <span class="material-icons" style="color:#38BDF8;">account_tree</span> Pipeline assíncrono 4M&amp;C
+            </h3>
+            <p style="font-size:0.82rem; color:var(--text-muted); margin-bottom:4px;">
+              A venda entra no cache. Em paralelo: o técnico já trabalha no Kanban <em>sem esperar a nota</em>, enquanto o Bling trata a NF-e.
+              Quando a NF é autorizada, o sistema destrava o ZPL. Só então a bipagem imprime a etiqueta.
+            </p>
+            <div class="pipeline-flow">
+              <div class="pipeline-col">
+                <div style="font-size:0.7rem; font-weight:800; color:#FFE600; margin-bottom:8px; text-transform:uppercase;">Entrada</div>
+                <div class="pipeline-node ml">① Venda Mercado Livre</div>
+                <div class="pipeline-arrow">↓</div>
+                <div class="pipeline-node">② SQLite · Fila «Novos pedidos»</div>
+              </div>
+              <div class="pipeline-arrow">⟹</div>
+              <div class="pipeline-col">
+                <div style="font-size:0.7rem; font-weight:800; color:#00C7B1; margin-bottom:8px; text-transform:uppercase;">Fiscal (automático)</div>
+                <div class="pipeline-node fiscal">③ Bling · Pedido de venda</div>
+                <div class="pipeline-arrow">↓</div>
+                <div class="pipeline-node fiscal">④ NF-e autorizada (SEFAZ)</div>
+                <div class="pipeline-arrow">↓</div>
+                <div class="pipeline-node fiscal">⑤ ZPL Mercado Envios engatilhado</div>
+              </div>
+              <div class="pipeline-arrow">⟹</div>
+              <div class="pipeline-col">
+                <div style="font-size:0.7rem; font-weight:800; color:#38BDF8; margin-bottom:8px; text-transform:uppercase;">Oficina (paralelo)</div>
+                <div class="pipeline-node kanban">③′ Fila Técnico / Montagem</div>
+                <div class="pipeline-arrow">↓</div>
+                <div class="pipeline-node kanban">④′ Em Separação / Pacote</div>
+                <div class="pipeline-arrow">↓</div>
+                <div class="pipeline-node kanban">⑤′ Caixa pronta na bancada</div>
+              </div>
+              <div class="pipeline-arrow">⟹</div>
+              <div class="pipeline-col">
+                <div style="font-size:0.7rem; font-weight:800; color:#F59E0B; margin-bottom:8px; text-transform:uppercase;">Convergência</div>
+                <div class="pipeline-node conv">⑥ Caixa + NF + ZPL</div>
+                <div class="pipeline-arrow">↓</div>
+                <div class="pipeline-node done">⑦ Bipagem → impressão ZPL</div>
+                <div class="pipeline-arrow">↓</div>
+                <div class="pipeline-node done">⑧ Transporte / Despachado</div>
+              </div>
+            </div>
+            <p style="font-size:0.75rem; color:var(--text-muted); margin-top:12px;">
+              Segredo da velocidade: se Bling/SEFAZ atrasarem, a oficina continua. A etiqueta só sai na bipagem quando o ZPL estiver engatilhado.
+            </p>
+          </div>
+
+          <div class="card" style="margin-bottom:16px;">
+            <h3 style="font-size:1rem; font-weight:800; color:#fff; margin-bottom:10px; display:flex; align-items:center; gap:8px;">
+              <span class="material-icons" style="color:#A78BFA;">flag</span> Status do roadmap (Etapas 1–4)
+            </h3>
+            <p style="font-size:0.78rem; color:var(--text-muted); margin-bottom:12px;">Fonte: <code style="color:#38BDF8;">docs/ROADMAP.md</code> + estado atual do código. Badges honestos — não inventamos «concluído».</p>
+
+            <div class="roadmap-row">
+              <span class="tutorial-badge amber">🟡 Em andamento</span>
+              <div>
+                <strong style="color:#FFF;">Etapa 1 — Usuários / roles / pickup</strong>
+                <p style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">CRUD de operadores + seletor no header + pickup no backend. Falta aba Equipe dedicada e botões Pegar/Enviar na tabela.</p>
+              </div>
+            </div>
+            <div class="roadmap-row">
+              <span class="tutorial-badge amber">🟡 Em andamento</span>
+              <div>
+                <strong style="color:#FFF;">Etapa 2 — Bling / NF-e</strong>
+                <p style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">Módulo de conexão (Client ID/Secret, OAuth, push de pedido) existe. Emissão de NF-e ainda <strong style="color:#FBBF24;">gated</strong> (<code>NFE_EMIT_ENABLED=false</code>).</p>
+              </div>
+            </div>
+            <div class="roadmap-row">
+              <span class="tutorial-badge green">🟢 Implementado</span>
+              <div>
+                <strong style="color:#FFF;">Etapa 3 — Webhook + ZPL engatilhado</strong>
+                <p style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">Backend pronto (webhook Bling → unlock → ZPL). Homologação externa (URL pública + ML write) ainda pendente.</p>
+              </div>
+            </div>
+            <div class="roadmap-row">
+              <span class="tutorial-badge amber">🟡 Em andamento</span>
+              <div>
+                <strong style="color:#FFF;">Etapa 4 — Bipagem + impressão</strong>
+                <p style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">API e aba Expedição existem. Use com cuidado: impressão física / CUPS ainda em validação — não trate como fluxo de chão 100% estável.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom:16px;">
+            <h3 style="font-size:1rem; font-weight:800; color:#fff; margin-bottom:10px; display:flex; align-items:center; gap:8px;">
+              <span class="material-icons" style="color:#0066FF;">play_circle</span> Como usar o sistema (operador)
+            </h3>
+
+            <div class="tutorial-step">
+              <div class="tutorial-step-num">1</div>
+              <div>
+                <strong style="color:#FFF;">Atualizar feed Mercado Livre</strong>
+                <p style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">Puxe pedidos/produtos do bridge 4M&amp;C para o SQLite. Rede só nesta ação — a UI lê o cache local.</p>
+                <button type="button" class="btn-add-order" style="margin-top:8px;" data-sync-btn onclick="syncMlFeedFromTutorials()" title="POST /api/v1/orders/sync-now">
+                  <span class="material-icons" style="font-size:16px;">cloud_download</span> Atualizar feed Mercado Livre
+                </button>
+              </div>
+            </div>
+            <div class="tutorial-step">
+              <div class="tutorial-step-num">2</div>
+              <div>
+                <strong style="color:#FFF;">Ver pedidos e filas</strong>
+                <p style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">Rail <strong style="color:#FFF;">carrinho</strong> / tag FILAS → Guia Pedidos com árvore de status à esquerda. Filtre e selecione pedidos na tabela.</p>
+                <button type="button" class="btn-add-order" style="margin-top:8px; background:#334155;" onclick="switchTab('orders', document.getElementById('rail-orders'))">Abrir Pedidos</button>
+              </div>
+            </div>
+            <div class="tutorial-step">
+              <div class="tutorial-step-num">3</div>
+              <div>
+                <strong style="color:#FFF;">Operadores (CRUD) e filas</strong>
+                <p style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">No header: seletor <em>Operador</em> + botão <strong style="color:#FFF;">+ CRUD</strong> para cadastrar técnicos. Pickup Pegar/Enviar existe na API; botões na tabela ainda estão em andamento (Etapa 1).</p>
+                <button type="button" class="btn-add-order" style="margin-top:8px; background:#334155;" onclick="openOperatorModal()">Abrir CRUD operadores</button>
+              </div>
+            </div>
+            <div class="tutorial-step">
+              <div class="tutorial-step-num">4</div>
+              <div>
+                <strong style="color:#FFF;">Conectar Bling</strong>
+                <p style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">Rail Canais → clique no card <strong style="color:#FFF;">Bling ERP</strong> → informe Client ID / Secret (e OAuth ou tokens). Status honestos: Configurado / Aguardando credenciais.</p>
+                <button type="button" class="btn-add-order" style="margin-top:8px; background:#334155;" onclick="switchTab('marketplaces', document.getElementById('rail-marketplaces')); setTimeout(openBlingModal, 80);">Abrir card Bling</button>
+              </div>
+            </div>
+            <div class="tutorial-step">
+              <div class="tutorial-step-num">5</div>
+              <div>
+                <strong style="color:#FFF;">Mercado Livre 4M&amp;C vs ML direto</strong>
+                <p style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">
+                  <strong style="color:#34D399;">4M&amp;C</strong> = feed read-only de pedidos (produção hoje).<br>
+                  <strong style="color:#FFE600;">ML direto</strong> = OAuth App ID/Secret no DevCenter (separado; para etiquetas/writes após homologação).
+                </p>
+                <button type="button" class="btn-add-order" style="margin-top:8px; background:#334155;" onclick="switchTab('marketplaces', document.getElementById('rail-marketplaces'))">Abrir Canais</button>
+              </div>
+            </div>
+            <div class="tutorial-step">
+              <div class="tutorial-step-num">6</div>
+              <div>
+                <strong style="color:#FFF;">Enviar para Bling (NF-e)</strong>
+                <p style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">Selecione pedidos → botão verde na toolbar. Cria/envia pedido de venda no Bling. <strong style="color:#FBBF24;">NF-e real só com NFE_EMIT_ENABLED=true</strong> — hoje costuma ficar bloqueada/gated.</p>
+              </div>
+            </div>
+            <div class="tutorial-step">
+              <div class="tutorial-step-num">7</div>
+              <div>
+                <strong style="color:#FFF;">O que ainda não fazer (produção física)</strong>
+                <p style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">
+                  Não use BaseLinker como fonte de pedidos. Não confie 100% em Pick&amp;Pack/ZPL físico até homologar impressora e webhook.
+                  Aba Expedição é para testes controlados — falhas devem aparecer no toast, sem fingir sucesso.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
       </div>
     </div>
   </div>
@@ -856,6 +1026,7 @@ async def get_web_ui():
     let currentOperatorId = null;
 
     let activeStatusFilter = 'Todos os pedidos';
+    let activeChannelFilter = 'All';
     let globalSearchTerm = '';
     let selectedOrderIds = new Set();
 
@@ -873,6 +1044,12 @@ async def get_web_ui():
       if (!term) return true;
       const fields = [order.id, order.external_id, order.customer, order.email, order.phone, order.item, order.sku, order.channel, order.status];
       return fields.some(f => f && String(f).toLowerCase().includes(term));
+    }}
+
+    function filterByChannel(channel) {{
+      activeChannelFilter = channel;
+      switchTab('orders');
+      renderOrdersTable();
     }}
 
     function openOrderModal(mode = 'NEW') {{
@@ -1398,6 +1575,8 @@ async def get_web_ui():
           }}
         }}
 
+        if (activeChannelFilter && activeChannelFilter !== 'All' && o.channel !== activeChannelFilter) return false;
+
         if (dateFrom) {{
           const dFrom = new Date(dateFrom + 'T00:00:00');
           const od = parseOrderDate(o.date);
@@ -1408,7 +1587,7 @@ async def get_web_ui():
           const od = parseOrderDate(o.date);
           if (od && od > dTo) return false;
         }}
-        
+
         return matchesSearch([o.id, o.external_id, o.customer, o.email, o.phone, o.item, o.sku, o.channel, o.status]);
       }});
       
@@ -1557,12 +1736,13 @@ async def get_web_ui():
 
     function downloadExcel() {{
       const filtered = applyFilters();
+      // CSV export: o.customer, o.status, o.date
+      let csv = "ID,NOME COMPRADOR,EMAIL,TELEFONE,STATUS,TOTAL,DATA\\n";
       if (filtered.length === 0) {{
         _toast('Nenhum pedido para baixar com os filtros atuais.', 'info');
         return;
       }}
       
-      let csv = "ID,NOME COMPRADOR,EMAIL,TELEFONE,STATUS,TOTAL,DATA\\n";
       filtered.forEach(o => {{
         const row = [
           o.id,
@@ -1766,6 +1946,8 @@ async def get_web_ui():
       document.getElementById('view-marketplaces').style.display = tabName === 'marketplaces' ? 'block' : 'none';
       document.getElementById('view-integrations').style.display = tabName === 'integrations' ? 'block' : 'none';
       document.getElementById('view-expedition').style.display = tabName === 'expedition' ? 'block' : 'none';
+      const viewTutorials = document.getElementById('view-tutorials');
+      if (viewTutorials) viewTutorials.style.display = tabName === 'tutorials' ? 'block' : 'none';
 
       if (tabName === 'products') renderProductsTable();
       if (tabName === 'users') renderUsersTeamTable();
@@ -1781,6 +1963,34 @@ async def get_web_ui():
     function syncWithBaseLinkerAPI() {{
       _toast('Recarregando a página com o cache SQLite local (Mercado Livre). BaseLinker não é fonte de dados.', 'info');
       setTimeout(function () {{ location.reload(); }}, 400);
+    }}
+
+    async function syncMlFeedFromTutorials() {{
+      const setBusy = (window.AppUx && AppUx.setBusyButtons) ? AppUx.setBusyButtons : null;
+      if (setBusy) setBusy('[data-sync-btn]', true, 'Sincronizando…');
+      try {{
+        const res = await fetch('/api/v1/orders/sync-now', {{ method: 'POST' }});
+        let data = {{}};
+        try {{ data = await res.json(); }} catch (_) {{}}
+        if (!res.ok) {{
+          const msg = (window.AppUx && AppUx.friendlyHttpError)
+            ? AppUx.friendlyHttpError(res, data)
+            : ('Falha no sync (' + res.status + '). Cache local preservado.');
+          _toast(msg, 'error');
+          return;
+        }}
+        const orders = (data.orders_synced != null) ? data.orders_synced : (data.synced_orders != null ? data.synced_orders : '—');
+        const products = (data.products_synced != null) ? data.products_synced : (data.synced_products != null ? data.synced_products : '—');
+        _toast('Feed ML atualizado. Pedidos: ' + orders + ' · Produtos: ' + products + '. Recarregando…', 'success');
+        setTimeout(function () {{ location.reload(); }}, 900);
+      }} catch (e) {{
+        const msg = (window.AppUx && AppUx.friendlyHttpError)
+          ? AppUx.friendlyHttpError(null, e)
+          : ('Sem conexão com a API. Cache preservado.');
+        _toast(msg, 'error');
+      }} finally {{
+        if (setBusy) setBusy('[data-sync-btn]', false);
+      }}
     }}
 
     function filterGlobalData(val) {{
@@ -2076,8 +2286,22 @@ async def get_web_ui():
     }} catch(e) {{}}
 
     renderOperatorsDropdown();
+    try {{
+      const savedOpId = localStorage.getItem('hub_current_operator_id');
+      const sel = document.getElementById('operator-select');
+      if (savedOpId && OPERATORS.find(o => String(o.id) === String(savedOpId))) {{
+        if (sel) sel.value = savedOpId;
+        switchOperator(savedOpId);
+      }} else if (OPERATORS.length) {{
+        if (sel) sel.value = OPERATORS[0].id;
+        switchOperator(OPERATORS[0].id);
+      }}
+    }} catch(e) {{
+      if (OPERATORS.length) switchOperator(OPERATORS[0].id);
+    }}
     renderCategorizedSidebar();
     renderOrdersTable();
+    renderUsersTeamTable();
 
     let initialTab = 'orders';
     try {{
