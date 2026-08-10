@@ -430,16 +430,17 @@ Comece pelo SPRINT 0 agora.
 
 ---
 
-## FORA DE ESCOPO DESTE PIPELINE (SaaS nativo)
+## FORA DE ESCOPO DESTE PIPELINE (produção nativa)
 
-Estes itens são da visão “Omnichannel Evolution” (`docs/ROADMAP.md` / skill), **não** da API BaseLinker:
+Este arquivo **não** governa o OMS de produção. Itens abaixo (e o roadmap oficial) vivem em `docs/ROADMAP.md` / skill:
 
+- **Etapas 1–4** oficiais: usuários/Kanban → Bling/NF-e → webhook+ZPL → bipagem+impressão
+- Filas nativas + pickup local (SQLite) — **não** status via API BL
+- Feed ML 4MC → SQLite como única fonte de pedidos
 - Agentes Stock/Fiscal/ERP/Shipping reais (não mock)
-- Multi-tenant JWT + pgcrypto
-- RabbitMQ EDA + Redis lock de estoque
-- SEFAZ / Bling / WhatsApp nativos (substituindo BL)
+- Multi-tenant JWT + pgcrypto / RabbitMQ EDA / Redis (visão longa)
 
-Trate-os em roadmap separado depois da paridade BL.
+Trate paridade BL como **molde UX** opcional; nunca como substituto das Etapas 1–4.
 
 ---
 

@@ -371,13 +371,25 @@ async def get_web_ui():
         <!-- View 2: Orders Hub (Gerenciador de Pedidos & Tabela Completa) -->
         <div id="view-orders" style="display:none;">
           <div class="card">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; flex-wrap:wrap; gap:10px;">
               <h3 style="font-size:1.05rem; font-weight:700; color:#fff;" id="orders-title">Todos os Pedidos ({len(orders_list)})</h3>
-              <div style="display:flex; gap:10px; align-items:center;">
-                <label style="color:#aaa; font-size:12px;">De:</label>
-                <input type="date" id="filter-date-from" style="background:#1E293B; border:1px solid #334155; color:#fff; border-radius:4px; padding:4px;">
-                <label style="color:#aaa; font-size:12px;">Até:</label>
-                <input type="date" id="filter-date-to" style="background:#1E293B; border:1px solid #334155; color:#fff; border-radius:4px; padding:4px;">
+              <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                <!-- Quick Date Filter Pills -->
+                <div style="display:flex; align-items:center; gap:4px; background:#0F172A; padding:3px; border-radius:8px; border:1px solid #334155;">
+                  <button class="quick-date-btn active" onclick="setQuickDateFilter('total', this)" style="background:#0066FF; color:#FFF; border:none; padding:5px 12px; border-radius:6px; font-size:0.75rem; font-weight:700; cursor:pointer;">Total</button>
+                  <button class="quick-date-btn" onclick="setQuickDateFilter('hoje', this)" style="background:transparent; color:#94A3B8; border:none; padding:5px 12px; border-radius:6px; font-size:0.75rem; font-weight:700; cursor:pointer;">Hoje</button>
+                  <button class="quick-date-btn" onclick="setQuickDateFilter('ontem', this)" style="background:transparent; color:#94A3B8; border:none; padding:5px 12px; border-radius:6px; font-size:0.75rem; font-weight:700; cursor:pointer;">Ontem</button>
+                  <button class="quick-date-btn" onclick="setQuickDateFilter('7dias', this)" style="background:transparent; color:#94A3B8; border:none; padding:5px 12px; border-radius:6px; font-size:0.75rem; font-weight:700; cursor:pointer;">7 Dias</button>
+                  <button class="quick-date-btn" onclick="setQuickDateFilter('mes', this)" style="background:transparent; color:#94A3B8; border:none; padding:5px 12px; border-radius:6px; font-size:0.75rem; font-weight:700; cursor:pointer;">Mês</button>
+                </div>
+
+                <div style="display:flex; align-items:center; gap:6px; background:#0F172A; padding:4px 8px; border-radius:8px; border:1px solid #334155;">
+                  <label style="color:#94A3B8; font-size:11px; font-weight:700;">DE:</label>
+                  <input type="date" id="filter-date-from" style="background:#1E293B; border:1px solid #334155; color:#fff; border-radius:4px; padding:3px 6px; font-size:0.78rem;">
+                  <label style="color:#94A3B8; font-size:11px; font-weight:700;">ATÉ:</label>
+                  <input type="date" id="filter-date-to" style="background:#1E293B; border:1px solid #334155; color:#fff; border-radius:4px; padding:3px 6px; font-size:0.78rem;">
+                </div>
+
                 <button class="quick-access-btn" style="background:#22a564; color:#FFF; border:none;" onclick="downloadExcel()">📥 Baixar Excel</button>
                 <button class="quick-access-btn" style="background:#0066FF; color:#FFF; border:none;" onclick="openAlterFilaModal()">Alterar fila</button>
                 <button class="btn-add-order" onclick="openOrderModal('NEW')">+ Adicionar Pedido</button>
@@ -981,6 +993,76 @@ async def get_web_ui():
       }});
       
       return filtered;
+    }}
+
+    function setQuickDateFilter(preset, btn) {{
+      const dFromInput = document.getElementById('filter-date-from');
+      const dToInput = document.getElementById('filter-date-to');
+      if (!dFromInput || !dToInput) return;
+
+      const now = new Date();
+      function fmtDate(d) {{
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        return `${{yyyy}}-${{mm}}-${{dd}}`;
+      }}
+
+      if (preset === 'hoje') {{
+        dFromInput.value = fmtDate(now);
+        dToInput.value = fmtDate(now);
+      }} else if (preset === 'ontem') {{
+        const yesterday = new Date(now);
+        yesterday.setDate(yesterday.getDate() - 1);
+        dFromInput.value = fmtDate(yesterday);
+        dToInput.value = fmtDate(yesterday);
+      }} else if (preset === '7dias') {{
+        const d7 = new Date(now);
+        d7.setDate(d7.getDate() - 7);
+        dFromInput.value = fmtDate(d7);
+        dToInput.value = fmtDate(now);
+      }} else if (preset === 'mes') {{
+        const firstDay = new Date(now.getFullYear(), now.getMonth(), 1);
+        dFromInput.value = fmtDate(firstDay);
+        dToInput.value = fmtDate(now);
+      }} else if (preset === 'total') {{
+        dFromInput.value = '';
+        dToInput.value = '';
+      }}
+
+      document.querySelectorAll('.quick-date-btn').forEach(b => {{
+        b.style.background = 'transparent';
+        b.style.color = '#94A3B8';
+      }});
+      if (btn) {{
+        btn.style.background = '#0066FF';
+        btn.style.color = '#FFF';
+      }}
+
+      renderOrdersTable();
+      updateOrdersCount();
+    }}
+
+    function openProductModal(id) {{
+      const p = REAL_PRODUCTS.find(x => String(x.id) === String(id));
+      if (!p) return;
+      document.getElementById('pm-title').innerText = p.name;
+      document.getElementById('pm-sku').innerText = p.sku || p.id;
+      document.getElementById('pm-ean').innerText = p.ean;
+      document.getElementById('pm-stock').innerText = (p.stock || 0) + ' un.';
+      document.getElementById('pm-sold').innerText = (p.sold_quantity || 0) + ' un.';
+      document.getElementById('pm-price').innerText = (p.price || 0).toLocaleString('pt-BR', {{ style: 'currency', currency: 'BRL' }});
+      document.getElementById('pm-link').href = p.permalink || '#';
+      
+      const avatarHtml = getProductAvatar(p.name, p.thumbnail);
+      document.getElementById('pm-avatar-container').innerHTML = avatarHtml;
+      document.getElementById('pm-tags-container').innerHTML = extractHardwareBadges(p.name) || '<span style="color:#94A3B8; font-size:0.8rem;">Geral / Hardware</span>';
+
+      document.getElementById('product-detail-modal').classList.add('open');
+    }}
+
+    function closeProductModal() {{
+      document.getElementById('product-detail-modal').classList.remove('open');
     }}
 
     function renderOrdersTable() {{

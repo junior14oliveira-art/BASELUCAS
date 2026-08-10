@@ -62,7 +62,7 @@ Estudo: `docs/BASELINKER_API_STUDY.md` · API oficial: https://api.baselinker.co
 
 ---
 
-## Fonte de dados (Fase 2 — feed em uso)
+## Fonte de dados (pré-requisito histórico “Fase 2” — feed em uso)
 
 Base 4MC (somente **GET** / read-only):  
 `https://fourmc-market-api.onrender.com/api/base-antigravity/ml`

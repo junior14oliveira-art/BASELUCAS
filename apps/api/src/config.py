@@ -85,6 +85,14 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
 
+    # Etapa 4 — impressão ZPL (Zebra/Elgin). dry_run = sem hardware.
+    # ZPL_PRINT_MODE: dry_run | raw | cups
+    ZPL_PRINT_MODE: str = "dry_run"
+    ZPL_PRINTER_HOST: str = "127.0.0.1"
+    ZPL_PRINTER_PORT: int = 9100
+    ZPL_CUPS_QUEUE: str = "zebra"
+    ZPL_PRINT_TIMEOUT_SEC: float = 8.0
+
     model_config = SettingsConfigDict(
         env_file=str(ENV_FILE),
         env_file_encoding="utf-8",
