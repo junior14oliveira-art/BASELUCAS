@@ -1,11 +1,16 @@
-# PIPELINE DE PROMPTS & ROADMAP — Paridade de molde UI (BaseLinker)
+# PIPELINE DE PROMPTS — Paridade de molde UI (BaseLinker)
 
-> **Contexto de produto (07/08/2026):** BASE ANTIGRAVITY é o **nosso** hub estilo BaseLinker.  
-> BaseLinker neste arquivo = **molde de UI/API client** (`apps/web`), **não** a fonte de dados.  
-> Dados reais = ML via 4MC + SQLite — ver `docs/DATA_SOURCE_ML_FEED.md`, `docs/ROADMAP.md` (Sprints 1–4), skill `omnichannel-hub`.
+> [!CAUTION]
+> **BaseLinker neste arquivo = MOLDE / ESTUDO de UI e client API.**  
+> **Não** é o pipeline de produção do hub. Não use `getOrders` / status BL como fonte operacional.  
+> **Produção (fonte da verdade):** `docs/ROADMAP.md` — **Etapas 1–4** (fábrica assíncrona).  
+> Dados reais = ML via 4MC + SQLite — `docs/DATA_SOURCE_ML_FEED.md`, skill `omnichannel-hub`.
 
+> **Contexto de produto:** BASE ANTIGRAVITY é o **nosso** hub estilo BaseLinker.  
+> Este documento cobre só a paridade do molde em `apps/web` (client + telas BL).  
 > Atualizado em **07/08/2026** · Diagnóstico do molde (`apps/web` + API oficial BL).  
-> Use cada bloco de prompt no Cursor/Kiro. Execute **um sprint por vez**, valide, avance.
+> Use cada bloco de prompt no Cursor/Kiro. Execute **um sprint por vez**, valide, avance.  
+> **Não** confundir os “Sprints 0–8” abaixo com as **Etapas 1–4** oficiais nem com as “Fases 1–4” históricas.
 
 ---
 
@@ -67,7 +72,10 @@
 
 ---
 
-## ROADMAP — 8 SPRINTS PARA PARIDADE BASELINKER
+## ROADMAP DE MOLDE — 8 SPRINTS PARA PARIDADE BASELINKER (estudo)
+
+> Escopo: fechar gaps do **client/UI** em `apps/web` contra a API oficial BL.  
+> **Não** substitui `docs/ROADMAP.md` (Etapas 1–4 de produção).
 
 ```
 SPRINT 0  →  Client API Gap (mapear os ~69 métodos)     (0.5–1 dia)

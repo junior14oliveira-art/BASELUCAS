@@ -42,6 +42,12 @@ class RealOrderDB(Base):
     buyer_doc: Mapped[str] = mapped_column(String(50), default="")  # CPF/CNPJ se bridge expor
     pack_id: Mapped[str] = mapped_column(String(50), default="")
     enrichment_json: Mapped[str] = mapped_column(Text, default="{}")
+    # Macro Fiscal (Bling) — Etapa 2
+    bling_pedido_id: Mapped[str] = mapped_column(String(50), default="")
+    bling_nfe_id: Mapped[str] = mapped_column(String(50), default="")
+    bling_status: Mapped[str] = mapped_column(String(50), default="")  # pending|pedido_criado|nfe_*|skipped_*|error
+    bling_last_error: Mapped[str] = mapped_column(Text, default="")
+    bling_pushed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 class RealProductDB(Base):
     __tablename__ = "real_products"
@@ -191,6 +197,24 @@ class SyncMetaDB(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
 
 
+class BlingConfigDB(Base):
+    """Tokens OAuth do Bling (API v3). Uma linha por conta ERP (account_key)."""
+    __tablename__ = "bling_config"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    account_key: Mapped[str] = mapped_column(String(50), unique=True, index=True, default="4mc")
+    account_label: Mapped[str] = mapped_column(String(255), default="Bling 4M&C")
+    access_token: Mapped[str] = mapped_column(Text, default="")
+    refresh_token: Mapped[str] = mapped_column(Text, default="")
+    # Epoch em segundos — access_token Bling costuma durar ~6h
+    expires_at: Mapped[float] = mapped_column(Float, default=0.0)
+    scopes: Mapped[str] = mapped_column(String(500), default="")
+    token_type: Mapped[str] = mapped_column(String(50), default="Bearer")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    connected_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    last_error: Mapped[str] = mapped_column(Text, default="")
+
+
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -254,5 +278,10 @@ def _ensure_real_orders_columns(sync_conn) -> None:
             ("buyer_doc", "ALTER TABLE real_orders ADD COLUMN buyer_doc VARCHAR(50) DEFAULT ''"),
             ("pack_id", "ALTER TABLE real_orders ADD COLUMN pack_id VARCHAR(50) DEFAULT ''"),
             ("enrichment_json", "ALTER TABLE real_orders ADD COLUMN enrichment_json TEXT DEFAULT '{}'"),
+            ("bling_pedido_id", "ALTER TABLE real_orders ADD COLUMN bling_pedido_id VARCHAR(50) DEFAULT ''"),
+            ("bling_nfe_id", "ALTER TABLE real_orders ADD COLUMN bling_nfe_id VARCHAR(50) DEFAULT ''"),
+            ("bling_status", "ALTER TABLE real_orders ADD COLUMN bling_status VARCHAR(50) DEFAULT ''"),
+            ("bling_last_error", "ALTER TABLE real_orders ADD COLUMN bling_last_error TEXT DEFAULT ''"),
+            ("bling_pushed_at", "ALTER TABLE real_orders ADD COLUMN bling_pushed_at DATETIME"),
         ],
     )

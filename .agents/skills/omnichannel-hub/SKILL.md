@@ -169,7 +169,7 @@ Tabela útil para o desenho futuro. **Hoje a maioria é stub/orquestração mock
 | `StockAgent` | Estoque multi-depósito / kits | Mock / planejado — **sem escrita no ML** |
 | `ERPAgent` | Bling / ERP | Mock / roadmap longo |
 | `FiscalAgent` | NF-e / SEFAZ | Mock / roadmap longo |
-| `ShippingAgent` | Frete + etiquetas | Skeleton: `ml_shipping_labels.py` + preview; ZPL Direct = Sprint 4 |
+| `ShippingAgent` | Frete + etiquetas | Skeleton: `ml_shipping_labels.py` + preview; ZPL Direct = **Etapa 3–4** (`docs/ROADMAP.md`) |
 | `NotificationAgent` | WhatsApp / pós-venda | Mock |
 | `FinancialAgent` | Margem / DRE | Mock |
 | `ReportAgent` | BI / previsão | Mock |

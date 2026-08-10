@@ -39,6 +39,8 @@ class Settings(BaseSettings):
     ML_REDIRECT_URI: str = "http://localhost:8000/api/v1/ml/auth/callback"
     ML_SITE_ID: str = "MLB"  # MLB = Brasil
     ML_WEBHOOK_SECRET: str = ""
+    # Escrita no ML bloqueada até homologação explícita
+    ML_READ_ONLY: bool = True
 
     # Feed read-only (bridge Base Antigravity → ML)
     # Base: .../api/base-antigravity/ml  → /feed /orders /items /questions /token
@@ -46,6 +48,27 @@ class Settings(BaseSettings):
     ML_FEED_URL: str = "https://fourmc-market-api.onrender.com/api/base-antigravity/ml/feed"
     ML_FEED_ORDERS_URL: str = "https://fourmc-market-api.onrender.com/api/base-antigravity/ml/orders"
     ML_FEED_TOKEN_URL: str = "https://fourmc-market-api.onrender.com/api/base-antigravity/ml/token"
+
+    # BaseLinker — molde/estudo; writes bloqueados por default
+    BASELINKER_READ_ONLY: bool = True
+
+    # ---------------------------------------------------------------------------
+    # Bling ERP API v3 — Macro Fiscal (Etapa 2)
+    # Docs: docs/BLING_API_STUDY.md · developer.bling.com.br
+    # Defaults seguros até homologação: READ_ONLY + NF-e off.
+    # ---------------------------------------------------------------------------
+    BLING_CLIENT_ID: str = ""
+    BLING_CLIENT_SECRET: str = ""
+    BLING_REDIRECT_URI: str = "http://localhost:8000/api/v1/bling/callback"
+    BLING_ACCOUNT_KEY: str = "4mc"  # chave em BlingConfigDB (4mc / portal / max / …)
+    BLING_READ_ONLY: bool = True
+    NFE_EMIT_ENABLED: bool = False
+    # Auto: após sync, pedidos pagos sem bling_pedido_id → push (ainda respeita READ_ONLY/NFE)
+    BLING_AUTO_PUSH_ON_PAID: bool = True
+    # ID da Natureza de Operação no Bling (obrigatório para emitir NF-e)
+    BLING_NATUREZA_OPERACAO_ID: int = 0
+    BLING_API_BASE_URL: str = "https://api.bling.com.br/Api/v3"
+    BLING_AUTH_BASE_URL: str = "https://www.bling.com.br/Api/v3/oauth"
 
     # CORS Origins — aceita lista JSON ou valores separados por vírgula no .env.
     # NoDecode desliga o parser JSON do pydantic-settings para que o validator
