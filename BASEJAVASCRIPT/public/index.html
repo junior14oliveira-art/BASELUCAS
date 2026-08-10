@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Base Lucas JS — 4M&amp;C</title>
+  <style>
+    :root { --bg:#14171d; --card:#1d212a; --text:#F1F5F9; --muted:#94A3B8; --primary:#0066FF; --border:#2e3646; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: system-ui, sans-serif; background:var(--bg); color:var(--text); padding:24px; }
+    h1 { margin:0 0 8px; }
+    .muted { color:var(--muted); font-size:0.9rem; }
+    .card { background:var(--card); border:1px solid var(--border); border-radius:10px; padding:16px; margin:16px 0; }
+    code { background:#0F172A; padding:2px 6px; border-radius:4px; }
+    button { background:var(--primary); color:#fff; border:0; border-radius:8px; padding:10px 14px; font-weight:700; cursor:pointer; }
+    pre { background:#0F172A; padding:12px; border-radius:8px; overflow:auto; font-size:0.8rem; }
+  </style>
+</head>
+<body>
+  <h1>Base Lucas <span style="color:var(--primary)">JS</span></h1>
+  <p class="muted">Conversão Node.js/Express do BASE ANTIGRAVITY — rotas em <code>/api/v1/*</code>, tabelas <code>base_*</code>.</p>
+
+  <div class="card">
+    <strong>Smoke test rápido</strong>
+    <p class="muted">Chama o backend local e mostra KPIs + operadores.</p>
+    <button type="button" onclick="runSmoke()">Rodar smoke test</button>
+    <pre id="out">Aguardando…</pre>
+  </div>
+
+  <div class="card">
+    <strong>Endpoints principais</strong>
+    <ul class="muted">
+      <li><code>GET /api/v1/operators</code></li>
+      <li><code>GET /api/v1/orders</code> · <code>POST /api/v1/orders/:id/pickup</code></li>
+      <li><code>POST /api/v1/expedition/scan</code></li>
+      <li><code>GET /api/v1/bling/status</code></li>
+      <li><code>GET /api/v1/ml/status</code> · <code>POST /api/v1/orders/sync-now</code></li>
+      <li><code>GET /api/v1/dashboard/kpis?period=7dias</code></li>
+    </ul>
+  </div>
+
+  <script>
+    async function runSmoke() {
+      const out = document.getElementById('out');
+      out.textContent = 'Carregando…';
+      try {
+        const [ops, kpis, printer] = await Promise.all([
+          fetch('/api/v1/operators').then(r => r.json()),
+          fetch('/api/v1/dashboard/kpis?period=total').then(r => r.json()),
+          fetch('/api/v1/expedition/printer').then(r => r.json()),
+        ]);
+        out.textContent = JSON.stringify({ operators: ops.length, kpis, printer }, null, 2);
+      } catch (e) {
+        out.textContent = 'Erro: ' + e.message + '\nSuba o server.js na pasta BASEJAVASCRIPT.';
+      }
+    }
+  </script>
+</body>
+</html>

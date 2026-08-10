@@ -1,0 +1,24 @@
+{
+  "name": "baselucas-node",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Base Lucas convertido de Python/FastAPI para Node.js/Express — módulo aditivo do 4M&C Market",
+  "main": "backend/src/index.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node backend/src/index.js",
+    "dev": "node --watch backend/src/index.js",
+    "migrate": "node backend/src/migrations/run.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.7",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.1",
+    "mysql2": "^3.11.3"
+  },
+  "optionalDependencies": {
+    "sqlite3": "^5.1.7"
+  }
+}

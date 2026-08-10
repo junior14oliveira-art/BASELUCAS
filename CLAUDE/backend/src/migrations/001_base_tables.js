@@ -1,0 +1,102 @@
+/**
+ * Cria as tabelas do Base Lucas. Todas com prefixo `base_`.
+ *
+ * IMPORTANTE: nenhuma tabela do 4M&C Market é lida, alterada ou dropada aqui.
+ * `base_order_pickups` é uma tabela SATÉLITE — em vez de adicionar colunas na
+ * tabela de pedidos existente, o vínculo pedido↔operador vive fora dela,
+ * ligado por `order_id`. É o que mantém a regra "zero modificação no legado".
+ */
+
+const db = require("../config/database");
+
+const ROLE_ADMIN = "Administrador";
+
+async function up() {
+  await db.connect();
+  const mysql = db.isMysql();
+
+  const pk = mysql
+    ? "INT AUTO_INCREMENT PRIMARY KEY"
+    : "INTEGER PRIMARY KEY AUTOINCREMENT";
+  const ts = mysql ? "DATETIME" : "TEXT";
+  const bool = mysql ? "TINYINT(1)" : "INTEGER";
+  const engine = mysql ? " ENGINE=InnoDB DEFAULT CHARSET=utf8mb4" : "";
+
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS base_operators (
+      id ${pk},
+      name VARCHAR(255) NOT NULL,
+      role VARCHAR(64) NOT NULL DEFAULT 'Técnico (Montagem)',
+      email VARCHAR(255) DEFAULT '',
+      is_active ${bool} NOT NULL DEFAULT 1,
+      created_at ${ts} DEFAULT NULL
+    )${engine}
+  `);
+
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS base_order_pickups (
+      id ${pk},
+      order_id VARCHAR(100) NOT NULL,
+      operator_id INT NOT NULL,
+      operator_name VARCHAR(255) DEFAULT '',
+      status_name VARCHAR(255) DEFAULT '',
+      origin_status_name VARCHAR(255) DEFAULT '',
+      released ${bool} NOT NULL DEFAULT 0,
+      picked_at ${ts} DEFAULT NULL,
+      released_at ${ts} DEFAULT NULL
+    )${engine}
+  `);
+
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS base_expedition_scans (
+      id ${pk},
+      barcode VARCHAR(255) NOT NULL,
+      order_id VARCHAR(100) DEFAULT '',
+      status VARCHAR(64) DEFAULT '',
+      print_mode VARCHAR(32) DEFAULT '',
+      message TEXT,
+      scanned_at ${ts} DEFAULT NULL
+    )${engine}
+  `);
+
+  // Índices — cada um isolado porque SQLite não aceita IF NOT EXISTS composto
+  // em todas as versões e MySQL antigo não aceita IF NOT EXISTS em índice.
+  const indices = [
+    ["idx_base_pickups_order", "base_order_pickups(order_id)"],
+    ["idx_base_pickups_operator", "base_order_pickups(operator_id)"],
+    ["idx_base_scans_order", "base_expedition_scans(order_id)"],
+    ["idx_base_scans_barcode", "base_expedition_scans(barcode)"],
+  ];
+  for (const [nome, alvo] of indices) {
+    try {
+      await db.execute(`CREATE INDEX ${nome} ON ${alvo}`);
+    } catch (err) {
+      // já existe — segue o baile
+    }
+  }
+
+  await seedOperators();
+}
+
+/** Semeia o time inicial só se a tabela estiver vazia. */
+async function seedOperators() {
+  const row = await db.get("SELECT COUNT(*) AS total FROM base_operators");
+  const total = Number(row?.total ?? row?.["COUNT(*)"] ?? 0);
+  if (total > 0) return;
+
+  const iniciais = [
+    ["José Wilsom De Oliveira Junior", ROLE_ADMIN, "josewilsom@4mc.com.br"],
+    ["Técnico (Montagem)", "Técnico (Montagem)", ""],
+    ["Expedição (Separação)", "Expedição (Separação)", ""],
+  ];
+  for (const [name, role, email] of iniciais) {
+    await db.execute(
+      `INSERT INTO base_operators (name, role, email, is_active, created_at)
+       VALUES (?, ?, ?, 1, ?)`,
+      [name, role, email, new Date().toISOString()]
+    );
+  }
+  console.log(`[base] ${iniciais.length} operadores semeados`);
+}
+
+module.exports = { up };
