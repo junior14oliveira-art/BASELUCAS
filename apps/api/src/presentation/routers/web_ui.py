@@ -61,6 +61,9 @@ async def get_web_ui():
                 "zpl_armed": bool(getattr(o, "zpl_armed", False)) or (getattr(o, "zpl_status", "") or "") == "ready",
                 "shipping_id": getattr(o, "shipping_id", "") or "",
                 "tracking_number": getattr(o, "tracking_number", "") or "",
+                "picked_by": getattr(o, "picked_by", "") or "",
+                "picked_by_id": int(getattr(o, "picked_by_id", 0) or 0),
+                "picked_from_status_name": getattr(o, "picked_from_status_name", "") or "",
             })
 
         # 4. Fetch Real Products from Database
@@ -218,6 +221,23 @@ async def get_web_ui():
     .expedition-scan-input:focus {{ border-color: #38BDF8; box-shadow: 0 0 0 3px rgba(56,189,248,0.2); }}
     .expedition-badge-ready {{ background: rgba(34,165,100,0.2); color: #34D399; border: 1px solid rgba(34,165,100,0.4); font-size: 0.72rem; font-weight: 800; padding: 3px 8px; border-radius: 12px; }}
     .expedition-badge-wait {{ background: rgba(234,134,77,0.15); color: #FBBF24; border: 1px solid rgba(234,134,77,0.35); font-size: 0.72rem; font-weight: 800; padding: 3px 8px; border-radius: 12px; }}
+    .tutorial-badge {{ display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:12px; font-size:0.72rem; font-weight:800; }}
+    .tutorial-badge.green {{ background:rgba(34,165,100,0.18); color:#34D399; border:1px solid rgba(34,165,100,0.4); }}
+    .tutorial-badge.amber {{ background:rgba(234,134,77,0.15); color:#FBBF24; border:1px solid rgba(234,134,77,0.35); }}
+    .tutorial-badge.rose {{ background:rgba(213,72,57,0.15); color:#FB7185; border:1px solid rgba(213,72,57,0.35); }}
+    .pipeline-flow {{ display:flex; flex-wrap:wrap; gap:10px; align-items:stretch; margin-top:14px; }}
+    .pipeline-col {{ flex:1; min-width:220px; background:#14171d; border:1px solid var(--border); border-radius:8px; padding:14px; }}
+    .pipeline-node {{ background:#0F172A; border:1px solid var(--border); border-radius:8px; padding:10px 12px; margin-bottom:8px; font-size:0.8rem; font-weight:700; color:#E2E8F0; }}
+    .pipeline-node.ml {{ border-color:#FFE600; color:#FFE600; }}
+    .pipeline-node.fiscal {{ border-color:#00C7B1; }}
+    .pipeline-node.kanban {{ border-color:#38BDF8; }}
+    .pipeline-node.conv {{ border-color:#F59E0B; }}
+    .pipeline-node.done {{ border-color:#10B981; color:#34D399; }}
+    .pipeline-arrow {{ display:flex; align-items:center; justify-content:center; color:var(--text-muted); font-size:1.2rem; font-weight:800; min-width:24px; }}
+    .tutorial-step {{ display:flex; gap:12px; padding:12px 0; border-bottom:1px solid var(--border); }}
+    .tutorial-step:last-child {{ border-bottom:none; }}
+    .tutorial-step-num {{ flex-shrink:0; width:28px; height:28px; border-radius:50%; background:#0066FF; color:#FFF; display:flex; align-items:center; justify-content:center; font-size:0.8rem; font-weight:800; }}
+    .roadmap-row {{ display:flex; gap:14px; align-items:flex-start; padding:14px; background:#14171d; border:1px solid var(--border); border-radius:8px; margin-bottom:10px; }}
   </style>
 </head>
 <body>
@@ -253,13 +273,6 @@ async def get_web_ui():
     </div>
     <div class="rail-item" id="rail-integrations" title="Mapa de Integrações" onclick="switchTab('integrations', this)">
       <span class="material-icons">extension</span>
-    </div>
-
-    <div style="margin-top:auto; display:flex; flex-direction:column; align-items:center; gap:6px;">
-      <div class="rail-tag" onclick="filterByChannel('All')">All</div>
-      <div class="rail-tag" onclick="filterByChannel('Mercado Livre')">ML</div>
-      <div class="rail-tag" onclick="filterByChannel('Shopee')">Sh</div>
-      <div class="rail-tag" onclick="filterByChannel('Amazon')">Am</div>
     </div>
   </div>
 
@@ -505,6 +518,43 @@ async def get_web_ui():
           </div>
         </div>
 
+        <!-- View: Usuários / Equipe (Etapa 1) -->
+        <div id="view-users" style="display:none;">
+          <div class="card">
+            <h3 style="font-size:1.1rem; font-weight:800; color:#fff; margin-bottom:16px; display:flex; align-items:center; gap:8px;">
+              <span class="material-icons" style="color:#0066FF;">groups</span> Usuários / Equipe
+            </h3>
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>NOME</th>
+                  <th>E-MAIL</th>
+                  <th>FUNÇÃO</th>
+                  <th>ATIVO</th>
+                  <th>AÇÕES</th>
+                </tr>
+              </thead>
+              <tbody id="users-team-body">
+                <!-- Rendered via JS -->
+              </tbody>
+            </table>
+            <div style="margin-top:16px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+              <input type="text" id="new-user-name" placeholder="Nome completo" style="flex:1; min-width:160px; padding:8px; border-radius:4px; border:1px solid var(--border); background:var(--bg); color:var(--text);">
+              <input type="email" id="new-user-email" placeholder="E-mail" style="flex:1; min-width:180px; padding:8px; border-radius:4px; border:1px solid var(--border); background:var(--bg); color:var(--text);">
+              <select id="new-user-role" style="padding:8px; border-radius:4px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-weight:600;">
+                <option value="Administrador">Administrador</option>
+                <option value="Técnico (Montagem)" selected>Técnico (Montagem)</option>
+                <option value="Expedição (Separação)">Expedição (Separação)</option>
+              </select>
+              <button class="btn-add-order" onclick="createUserFromTeamTab()">+ Cadastrar usuário</button>
+            </div>
+            <p style="margin-top:12px; font-size:0.82rem;">
+              <a href="#" onclick="openOperatorModal(); return false;" style="color:#38BDF8; font-weight:700; text-decoration:none;">Abrir gestão avançada de operadores (modal)</a>
+            </p>
+          </div>
+        </div>
+
         <!-- View 4: Automations Engine -->
         <div id="view-automations" style="display:none;">
           <div class="card" style="border-left:4px solid var(--amber);">
@@ -644,7 +694,11 @@ async def get_web_ui():
       
       <div style="display:flex; gap:10px; margin-bottom:16px;">
         <input type="text" id="new-op-name" placeholder="Nome do Técnico (ex: Técnico Lucas)" style="flex:1; padding:8px; border-radius:4px; border:1px solid var(--border); background:var(--bg); color:var(--text);">
-        <input type="text" id="new-op-role" placeholder="Função (ex: Separação)" style="width:140px; padding:8px; border-radius:4px; border:1px solid var(--border); background:var(--bg); color:var(--text);">
+        <select id="new-op-role" style="width:200px; padding:8px; border-radius:4px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-weight:600;">
+          <option value="Administrador">Administrador</option>
+          <option value="Técnico (Montagem)" selected>Técnico (Montagem)</option>
+          <option value="Expedição (Separação)">Expedição (Separação)</option>
+        </select>
         <button class="btn-add-order" onclick="createOperator()">+ Cadastrar</button>
       </div>
 
@@ -798,6 +852,9 @@ async def get_web_ui():
     const REAL_PRODUCTS = {products_json};
     let OPERATORS = {operators_json};
 
+    const CANONICAL_ROLES = ["Administrador", "Técnico (Montagem)", "Expedição (Separação)"];
+    let currentOperatorId = null;
+
     let activeStatusFilter = 'Todos os pedidos';
     let globalSearchTerm = '';
     let selectedOrderIds = new Set();
@@ -908,6 +965,10 @@ async def get_web_ui():
         statuses: ["Pedidos Criados", "Notebook - Geral", "Técnico Dayvid", "Técnico Jose Wilsom", "Técnico Luan", "Técnica Maria Luiza", "Técnico Mauricio", "Técnico Pietro", "Ingrid Dorta", "Gabriel", "Gustavo Cleytinho"]
       }},
       {{
+        name: "CHÃO DE FÁBRICA",
+        statuses: ["Fila Técnico"]
+      }},
+      {{
         name: "COMPUTADORES / PC",
         statuses: ["Computadores - Geral", "Técnico Gustavo", "Técnico José Barbosa", "Técnico Thiago"]
       }},
@@ -1011,6 +1072,32 @@ async def get_web_ui():
       }});
     }}
 
+    function getCurrentOperator() {{
+      if (!currentOperatorId) return null;
+      return OPERATORS.find(o => String(o.id) === String(currentOperatorId)) || null;
+    }}
+
+    function personalQueueLabel(name) {{
+      return `Fila · ${{name}}`;
+    }}
+
+    function buildRoleSelectOptions(selectedRole) {{
+      return CANONICAL_ROLES.map(r =>
+        `<option value="${{r}}"${{r === selectedRole ? ' selected' : ''}}>${{r}}</option>`
+      ).join('');
+    }}
+
+    function applyOrderUpdate(orderId, orderData) {{
+      const idx = REAL_ORDERS.findIndex(o => String(o.id) === String(orderId));
+      if (idx >= 0 && orderData) {{
+        REAL_ORDERS[idx].status_id = orderData.status_id;
+        REAL_ORDERS[idx].status = orderData.status_name;
+        REAL_ORDERS[idx].picked_by = orderData.picked_by || '';
+        REAL_ORDERS[idx].picked_by_id = orderData.picked_by_id || 0;
+        REAL_ORDERS[idx].picked_from_status_name = orderData.picked_from_status_name || '';
+      }}
+    }}
+
     function renderOperatorsDropdown() {{
       const select = document.getElementById('operator-select');
       if (!select) return;
@@ -1019,11 +1106,16 @@ async def get_web_ui():
     }}
 
     function switchOperator(opId) {{
+      currentOperatorId = parseInt(opId, 10) || null;
+      try {{ localStorage.setItem('hub_current_operator_id', String(opId)); }} catch(e) {{}}
       const op = OPERATORS.find(o => String(o.id) === String(opId));
       if (op) {{
         document.getElementById('current-user-name').innerText = op.name;
         document.getElementById('user-avatar-initials').innerText = op.name.substring(0, 2).toUpperCase();
       }}
+      renderCategorizedSidebar();
+      renderOrdersTable();
+      renderUsersTeamTable();
     }}
 
     function renderOperatorsCrudList() {{
@@ -1043,7 +1135,8 @@ async def get_web_ui():
 
     function createOperator() {{
       const name = document.getElementById('new-op-name').value.trim();
-      const role = document.getElementById('new-op-role').value.trim() || 'Técnico';
+      const roleEl = document.getElementById('new-op-role');
+      const role = roleEl ? roleEl.value : 'Técnico (Montagem)';
       if (!name) {{ _toast('Digite o nome do operador.', 'info'); return; }}
 
       fetch('/api/v1/operators', {{
@@ -1055,20 +1148,145 @@ async def get_web_ui():
       .then(newOp => {{
         OPERATORS.push(newOp);
         renderOperatorsDropdown();
+        renderUsersTeamTable();
         document.getElementById('new-op-name').value = '';
-        document.getElementById('new-op-role').value = '';
+        if (roleEl) roleEl.value = 'Técnico (Montagem)';
         _toast('Operador ' + newOp.name + ' cadastrado.', 'success');
       }})
       .catch(e => _toast('Não foi possível cadastrar: ' + (e.message || e), 'error'));
     }}
 
+    async function updateOperator(id, payload) {{
+      const res = await fetch(`/api/v1/operators/${{id}}`, {{
+        method: 'PUT',
+        headers: {{ 'Content-Type': 'application/json' }},
+        body: JSON.stringify(payload)
+      }});
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || data.message || 'Falha ao atualizar operador');
+      const idx = OPERATORS.findIndex(o => o.id === id);
+      if (idx >= 0) OPERATORS[idx] = {{ ...OPERATORS[idx], ...data }};
+      return data;
+    }}
+
+    function renderUsersTeamTable() {{
+      const tbody = document.getElementById('users-team-body');
+      if (!tbody) return;
+      tbody.innerHTML = OPERATORS.map(o => `
+        <tr>
+          <td><strong>#${{o.id}}</strong></td>
+          <td><strong>${{o.name}}</strong></td>
+          <td style="font-size:0.78rem; color:var(--text-muted);">${{o.email || '—'}}</td>
+          <td>
+            <select id="user-role-${{o.id}}" style="padding:4px 6px; border-radius:4px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-size:0.78rem;" onchange="saveUserRole(${{o.id}}, this.value)">
+              ${{buildRoleSelectOptions(o.role)}}
+            </select>
+          </td>
+          <td>
+            <button style="background:${{o.is_active !== false ? 'rgba(34,165,100,0.2)' : 'rgba(212,72,57,0.2)'}}; color:${{o.is_active !== false ? '#34D399' : '#F87171'}}; border:1px solid var(--border); padding:4px 10px; border-radius:4px; font-size:0.75rem; cursor:pointer; font-weight:700;" onclick="toggleUserActive(${{o.id}})">
+              ${{o.is_active !== false ? 'Ativo' : 'Inativo'}}
+            </button>
+          </td>
+          <td>
+            <button style="background:var(--rose); color:#fff; border:none; padding:4px 8px; border-radius:4px; font-size:0.75rem; cursor:pointer;" onclick="deleteOperator(${{o.id}})">Excluir</button>
+          </td>
+        </tr>
+      `).join('');
+    }}
+
+    async function saveUserRole(id, role) {{
+      try {{
+        await updateOperator(id, {{ role }});
+        renderOperatorsDropdown();
+        renderUsersTeamTable();
+        _toast('Função atualizada.', 'success');
+      }} catch (e) {{
+        _toast('Erro: ' + (e.message || e), 'error');
+        renderUsersTeamTable();
+      }}
+    }}
+
+    async function toggleUserActive(id) {{
+      const op = OPERATORS.find(o => o.id === id);
+      if (!op) return;
+      try {{
+        await updateOperator(id, {{ is_active: !(op.is_active !== false) }});
+        renderOperatorsDropdown();
+        renderUsersTeamTable();
+        _toast('Status do usuário atualizado.', 'success');
+      }} catch (e) {{
+        _toast('Erro: ' + (e.message || e), 'error');
+      }}
+    }}
+
+    function createUserFromTeamTab() {{
+      const name = document.getElementById('new-user-name').value.trim();
+      const email = document.getElementById('new-user-email').value.trim();
+      const roleEl = document.getElementById('new-user-role');
+      const role = roleEl ? roleEl.value : 'Técnico (Montagem)';
+      if (!name) {{ _toast('Digite o nome do usuário.', 'info'); return; }}
+
+      fetch('/api/v1/operators', {{
+        method: 'POST',
+        headers: {{'Content-Type': 'application/json'}},
+        body: JSON.stringify({{ name, role, email }})
+      }})
+      .then(r => r.json())
+      .then(newOp => {{
+        OPERATORS.push(newOp);
+        renderOperatorsDropdown();
+        renderUsersTeamTable();
+        document.getElementById('new-user-name').value = '';
+        document.getElementById('new-user-email').value = '';
+        if (roleEl) roleEl.value = 'Técnico (Montagem)';
+        _toast('Usuário ' + newOp.name + ' cadastrado!', 'success');
+      }})
+      .catch(e => _toast('Erro ao cadastrar: ' + (e.message || e), 'error'));
+    }}
+
     function deleteOperator(opId) {{
       if (!(window.AppUx && AppUx.confirmDestructive ? AppUx.confirmDestructive('Excluir o operador #' + opId + '? Esta ação não pode ser desfeita.') : confirm('Excluir o operador #' + opId + '?'))) return;
       fetch(`/api/v1/operators/${{opId}}`, {{ method: 'DELETE' }})
-      .then(() => {{
+      .then(r => {{
+        if (!r.ok) return r.json().then(j => {{ throw new Error(j.detail || 'Falha ao excluir'); }});
         OPERATORS = OPERATORS.filter(o => o.id !== opId);
+        if (String(currentOperatorId) === String(opId) && OPERATORS.length) {{
+          switchOperator(OPERATORS[0].id);
+        }}
         renderOperatorsDropdown();
-      }});
+        renderUsersTeamTable();
+        _toast('Operador excluído.', 'info');
+      }})
+      .catch(e => _toast('Erro: ' + (e.message || e), 'error'));
+    }}
+
+    async function orderPickupAction(orderId, action) {{
+      if (!currentOperatorId) {{
+        _toast('Selecione um operador antes de executar esta ação.', 'warning');
+        return;
+      }}
+      const endpoints = {{
+        pickup: `/api/v1/orders/${{encodeURIComponent(orderId)}}/pickup`,
+        send: `/api/v1/orders/${{encodeURIComponent(orderId)}}/send-to-queue`,
+        release: `/api/v1/orders/${{encodeURIComponent(orderId)}}/release`
+      }};
+      const url = endpoints[action];
+      if (!url) return;
+      try {{
+        const res = await fetch(url, {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{ operator_id: currentOperatorId }})
+        }});
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || data.message || 'Ação falhou');
+        if (data.order) applyOrderUpdate(orderId, data.order);
+        _toast(data.message || 'Ação concluída.', 'success');
+        renderCategorizedSidebar();
+        renderOrdersTable();
+      }} catch (e) {{
+        _toast('Erro: ' + (e.message || e), 'error');
+      }}
     }}
 
     function renderCategorizedSidebar() {{
@@ -1082,6 +1300,24 @@ async def get_web_ui():
 
       let html = '';
       const groupedSet = new Set();
+
+      const curOp = getCurrentOperator();
+      if (curOp) {{
+        const pqLabel = personalQueueLabel(curOp.name);
+        const pqCount = REAL_ORDERS.filter(o =>
+          (o.status && o.status.startsWith('Fila ·') && Number(o.picked_by_id) === Number(curOp.id)) ||
+          o.status === pqLabel
+        ).length;
+        const pqActive = activeStatusFilter === pqLabel ? 'active' : '';
+        const safePq = pqLabel.replace(/'/g, "\\'");
+        html += `
+          <div class="status-group-header">
+            <span>MINHA FILA</span> <span>${{pqCount}}</span>
+          </div>
+          <div class="status-tree-item ${{pqActive}}" onclick="filterByStatus('${{safePq}}', this)">
+            <span>${{pqLabel}}</span> <span class="status-badge-count" style="background:#b80af7;">${{pqCount}}</span>
+          </div>`;
+      }}
 
       STATUS_GROUPS.forEach(group => {{
         let groupTotal = 0;
@@ -1152,7 +1388,15 @@ async def get_web_ui():
       const dateTo = document.getElementById('filter-date-to')?.value;
       
       let filtered = REAL_ORDERS.filter(o => {{
-        if (activeStatusFilter !== 'Todos os pedidos' && o.status !== activeStatusFilter) return false;
+        if (activeStatusFilter !== 'Todos os pedidos') {{
+          const op = getCurrentOperator();
+          if (op && activeStatusFilter === personalQueueLabel(op.name)) {{
+            const pq = personalQueueLabel(op.name);
+            if (Number(o.picked_by_id) !== Number(currentOperatorId) && o.status !== pq) return false;
+          }} else if (o.status !== activeStatusFilter) {{
+            return false;
+          }}
+        }}
 
         if (dateFrom) {{
           const dFrom = new Date(dateFrom + 'T00:00:00');
@@ -1254,7 +1498,24 @@ async def get_web_ui():
           : `Pedidos na Fila: ${{activeStatusFilter}} (${{filtered.length}})`;
       }}
 
-      const rowsHtml = filtered.map(o => `
+      const rowsHtml = filtered.map(o => {{
+        const op = getCurrentOperator();
+        const pq = op ? personalQueueLabel(op.name) : '';
+        const isPickedByMe = currentOperatorId && Number(o.picked_by_id) === Number(currentOperatorId);
+        const inMyQueue = isPickedByMe || (pq && o.status === pq);
+        const hasPickedBy = !!(o.picked_by || '').trim();
+        const showPickup = currentOperatorId && !hasPickedBy && !inMyQueue;
+        const showSend = currentOperatorId && inMyQueue;
+        const showRelease = currentOperatorId && (inMyQueue || hasPickedBy);
+        const actionBtns = [
+          showPickup ? `<button style="background:#0066FF;color:#FFF;border:none;padding:3px 8px;border-radius:4px;font-size:0.68rem;font-weight:700;cursor:pointer;margin:1px;" onclick="orderPickupAction('${{o.id}}','pickup')">Pegar</button>` : '',
+          showSend ? `<button style="background:#22a564;color:#FFF;border:none;padding:3px 8px;border-radius:4px;font-size:0.68rem;font-weight:700;cursor:pointer;margin:1px;" onclick="orderPickupAction('${{o.id}}','send')">Enviar</button>` : '',
+          showRelease ? `<button style="background:#ea864d;color:#FFF;border:none;padding:3px 8px;border-radius:4px;font-size:0.68rem;font-weight:700;cursor:pointer;margin:1px;" onclick="orderPickupAction('${{o.id}}','release')">Liberar</button>` : ''
+        ].filter(Boolean).join(' ');
+        const pickedBadge = o.picked_by
+          ? `<span class="badge" style="background:rgba(184,10,247,0.2); color:#C084FC; font-size:0.65rem; margin-top:3px; display:inline-block;">👤 ${{o.picked_by}}</span>`
+          : '';
+        return `
         <tr>
           <td><input type="checkbox" value="${{o.id}}" ${{selectedOrderIds.has(String(o.id)) ? 'checked' : ''}} onchange="toggleSelectOrder('${{o.id}}', this.checked)"></td>
           <td>
@@ -1269,21 +1530,23 @@ async def get_web_ui():
           <td><strong style="color:#FFF;">${{o.price.toFixed(2)}} R$</strong></td>
           <td>
             <span class="status-pill" style="background:${{getStatusColor(o.status)}}">${{o.status}}</span><br>
+            ${{pickedBadge}}
             <span style="font-size:0.68rem; color:var(--text-muted);">${{o.shipping_status}}</span>
           </td>
           <td>
             <span style="font-size:0.72rem; color:#E2E8F0;">${{o.date}}</span>
           </td>
-        </tr>
-      `).join('');
+          <td>${{actionBtns || '<span style="color:var(--text-muted);font-size:0.68rem;">—</span>'}}</td>
+        </tr>`;
+      }}).join('');
 
       if (!filtered.length) {{
         const hint = (globalSearchTerm || activeStatusFilter !== 'Todos os pedidos')
           ? (window.AppUx && AppUx.CLEAR_FILTER_TIP) || 'Ajuste a busca ou a fila na barra lateral.'
           : 'Sincronize pedidos do Mercado Livre ou recarregue o cache local.';
         tbody.innerHTML = (window.AppUx && AppUx.emptyTableRowHtml)
-          ? AppUx.emptyTableRowHtml(7, 'Nenhum pedido nesta visão.', hint)
-          : '<tr><td colspan="7" style="text-align:center;padding:24px;color:#94A3B8;">Nenhum pedido nesta visão.</td></tr>';
+          ? AppUx.emptyTableRowHtml(8, 'Nenhum pedido nesta visão.', hint)
+          : '<tr><td colspan="8" style="text-align:center;padding:24px;color:#94A3B8;">Nenhum pedido nesta visão.</td></tr>';
         return;
       }}
       tbody.innerHTML = rowsHtml;
@@ -1498,12 +1761,14 @@ async def get_web_ui():
       document.getElementById('view-dashboard').style.display = tabName === 'dashboard' ? 'block' : 'none';
       document.getElementById('view-orders').style.display = tabName === 'orders' ? 'block' : 'none';
       document.getElementById('view-products').style.display = tabName === 'products' ? 'block' : 'none';
+      document.getElementById('view-users').style.display = tabName === 'users' ? 'block' : 'none';
       document.getElementById('view-automations').style.display = tabName === 'automations' ? 'block' : 'none';
       document.getElementById('view-marketplaces').style.display = tabName === 'marketplaces' ? 'block' : 'none';
       document.getElementById('view-integrations').style.display = tabName === 'integrations' ? 'block' : 'none';
       document.getElementById('view-expedition').style.display = tabName === 'expedition' ? 'block' : 'none';
 
       if (tabName === 'products') renderProductsTable();
+      if (tabName === 'users') renderUsersTeamTable();
       if (tabName === 'expedition') {{
         refreshExpeditionPanel();
         setTimeout(function() {{
@@ -1514,8 +1779,8 @@ async def get_web_ui():
     }}
 
     function syncWithBaseLinkerAPI() {{
-      alert("🔄 Sincronizando filas com a API do BaseLinker...");
-      location.reload();
+      _toast('Recarregando a página com o cache SQLite local (Mercado Livre). BaseLinker não é fonte de dados.', 'info');
+      setTimeout(function () {{ location.reload(); }}, 400);
     }}
 
     function filterGlobalData(val) {{
@@ -1572,7 +1837,7 @@ async def get_web_ui():
       const accessToken = (document.getElementById('bling-access-token') || {{}}).value || '';
       const refreshToken = (document.getElementById('bling-refresh-token') || {{}}).value || '';
       if (!clientId.trim() || !clientSecret.trim()) {{
-        alert('Informe Client ID e Client Secret do app Bling.');
+        _toast('Informe Client ID e Client Secret do app Bling.', 'info');
         return;
       }}
       try {{
@@ -1595,9 +1860,8 @@ async def get_web_ui():
           const data2 = await res2.json();
           if (!res2.ok) throw new Error(data2.detail || data2.message || 'Falha ao salvar tokens');
         }}
-        alert(data.message || 'Credenciais Bling salvas.');
         await refreshBlingCardStatus();
-        _toast('Bling: API salva', 'success');
+        _toast(data.message || 'Credenciais Bling salvas.', 'success');
       }} catch (e) {{
         _toast('Erro ao salvar Bling: ' + (e.message || e), 'error');
       }}
@@ -1620,7 +1884,7 @@ async def get_web_ui():
     }}
 
     async function clearBlingConnection() {{
-      if (!confirm('Limpar tokens Bling desta conta?')) return;
+      if (!(window.AppUx && AppUx.confirmDestructive ? AppUx.confirmDestructive('Limpar tokens Bling desta conta? Você precisará reconectar o OAuth.') : confirm('Limpar tokens Bling desta conta?'))) return;
       try {{
         const res = await fetch('/api/v1/bling/connection', {{ method: 'DELETE' }});
         const data = await res.json();
@@ -1635,6 +1899,105 @@ async def get_web_ui():
       if (window.AppUx && AppUx.showToast) AppUx.showToast(msg, kind || 'info');
       else alert(msg);
     }}
+
+    function _extractApiError(data, fallback) {{
+      if (!data) return fallback || 'Erro desconhecido';
+      if (typeof data.detail === 'string') return data.detail;
+      if (data.detail && data.detail.message) return data.detail.message;
+      if (data.message) return data.message;
+      try {{ return JSON.stringify(data.detail || data); }} catch (e) {{ return fallback || 'Erro'; }}
+    }}
+
+    async function refreshExpeditionPanel() {{
+      const printerEl = document.getElementById('expedition-printer-status');
+      const tbody = document.getElementById('expedition-ready-body');
+      try {{
+        const [printerRes, readyRes] = await Promise.all([
+          fetch('/api/v1/expedition/printer'),
+          fetch('/api/v1/expedition/ready?limit=50')
+        ]);
+        const printer = await printerRes.json();
+        const ready = await readyRes.json();
+        if (printerEl) {{
+          const mode = (printer.mode || 'dry_run').toUpperCase();
+          printerEl.innerHTML = 'Modo: <strong style="color:#38BDF8;">' + mode + '</strong> — ' + (printer.ready_hint || '');
+        }}
+        if (!tbody) return;
+        const orders = ready.orders || [];
+        if (!orders.length) {{
+          let html = '<tr><td colspan="5" style="color:var(--text-muted); font-size:0.85rem;">Nenhuma caixa com ZPL engatilhada. Use <em>Engatilhar teste</em> ou aguarde a Etapa 3.</td></tr>';
+          REAL_ORDERS.slice(0, 5).forEach(function(o) {{
+            html += '<tr><td><strong style="color:#38BDF8;">#' + o.id + '</strong></td><td>' + (o.customer || '—') + '</td><td><span class="expedition-badge-wait">Aguardando</span></td><td>' + (o.status || '—') + '</td><td><button type="button" class="btn-add-order" style="padding:4px 10px; font-size:0.72rem;" onclick="armExpeditionTest(\\'' + o.id + '\\')">Engatilhar teste</button></td></tr>';
+          }});
+          tbody.innerHTML = html;
+          return;
+        }}
+        tbody.innerHTML = orders.map(function(o) {{
+          return '<tr><td><strong style="color:#38BDF8;">#' + o.id + '</strong><br><span style="font-size:0.68rem;color:var(--text-muted);">' + (o.shipping_id || o.external_id || '') + '</span></td><td>' + (o.customer || '—') + '</td><td><span class="expedition-badge-ready">Engatilhada</span></td><td>' + (o.status || '—') + '</td><td><button type="button" class="btn-add-order" style="padding:4px 10px; font-size:0.72rem; background:#334155;" onclick="submitExpeditionScan(\\'' + o.id + '\\')">Bipar</button></td></tr>';
+        }}).join('');
+      }} catch (e) {{
+        if (printerEl) printerEl.innerText = 'Impressora: erro ao carregar status';
+        if (tbody) tbody.innerHTML = '<tr><td colspan="5" style="color:#F87171;">Falha ao carregar expedição. API em :8000?</td></tr>';
+        _toast(window.AppUx ? AppUx.friendlyHttpError(e) : (e.message || e), 'error');
+      }}
+    }}
+
+    async function armExpeditionTest(orderId) {{
+      try {{
+        const res = await fetch('/api/v1/expedition/arm/' + encodeURIComponent(orderId), {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{ mark_ready_status: true }})
+        }});
+        const data = await res.json();
+        if (!res.ok) throw new Error(_extractApiError(data, 'Falha ao engatilhar'));
+        _toast(data.message || 'ZPL engatilhada para teste.', 'success');
+        await refreshExpeditionPanel();
+      }} catch (e) {{
+        _toast('Engatilhar teste: ' + (e.message || e), 'error');
+      }}
+    }}
+
+    async function submitExpeditionScan(barcode) {{
+      const code = (barcode || '').trim();
+      if (!code) return;
+      const input = document.getElementById('expedition-scan-input');
+      if (input) input.disabled = true;
+      try {{
+        const res = await fetch('/api/v1/expedition/scan', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{ barcode: code, dry_run: true }})
+        }});
+        const data = await res.json();
+        if (!res.ok) {{
+          _toast(_extractApiError(data, 'Bipagem recusada'), 'error');
+          return;
+        }}
+        const order = data.order || {{}};
+        _toast((data.message || 'Etiqueta impressa.') + ' Pedido #' + (order.id || code), 'success');
+        await refreshExpeditionPanel();
+      }} catch (e) {{
+        _toast(window.AppUx ? AppUx.friendlyHttpError(e) : (e.message || e), 'error');
+      }} finally {{
+        if (input) {{
+          input.disabled = false;
+          input.value = '';
+          input.focus();
+        }}
+      }}
+    }}
+
+    (function bindExpeditionScanner() {{
+      const inp = document.getElementById('expedition-scan-input');
+      if (!inp) return;
+      inp.addEventListener('keydown', function(ev) {{
+        if (ev.key === 'Enter') {{
+          ev.preventDefault();
+          submitExpeditionScan(inp.value);
+        }}
+      }});
+    }})();
 
     async function refreshMlDirectCardStatus() {{
       const el = document.getElementById('ml-direct-card-status');
@@ -1682,66 +2045,6 @@ async def get_web_ui():
         if (redirectUri.trim()) body.redirect_uri = redirectUri.trim();
         const res = await fetch('/api/v1/ml/credentials', {{
           method: 'POST',
-          headers: {{ 'Content-Type': 'application/json' }},
-          body: JSON.stringify(body)
-        }});
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || data.message || 'Falha ao salvar');
-        _toast(data.message || 'Credenciais ML salvas.', 'success');
-        await refreshMlDirectCardStatus();
-      }} catch (e) {{
-        _toast('Erro ML: ' + (e.message || e), 'error');
-      }}
-    }}
-
-    async function startMlDirectOAuth() {{
-      try {{
-        const res = await fetch('/api/v1/ml/auth/url');
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || data.message || 'Falha ao gerar URL OAuth');
-        if (!data.authorization_url) throw new Error('URL de autorização ausente');
-        window.location.href = data.authorization_url;
-      }} catch (e) {{
-        _toast('OAuth ML: ' + (e.message || e), 'error');
-      }}
-    }}
-
-    // Init UI on load
-    try {{
-      const savedStatus = localStorage.getItem('active_status_filter');
-      if (savedStatus) activeStatusFilter = savedStatus;
-    }} catch(e) {{}}
-
-    renderOperatorsDropdown();
-    renderCategorizedSidebar();
-    renderOrdersTable();
-
-    let initialTab = 'orders';
-    try {{
-      initialTab = localStorage.getItem('active_tab') || 'orders';
-      const params = new URLSearchParams(window.location.search);
-      if (params.get('tab')) initialTab = params.get('tab');
-      if (params.get('bling') === 'ok') {{
-        initialTab = 'marketplaces';
-        setTimeout(() => _toast('Bling OAuth concluído — tokens salvos.', 'success'), 400);
-      }}
-      if (params.get('bling_error')) {{
-        initialTab = 'marketplaces';
-        setTimeout(() => _toast('Erro Bling OAuth: ' + params.get('bling_error'), 'error'), 400);
-      }}
-    }} catch(e) {{}}
-    switchTab(initialTab);
-    refreshBlingCardStatus();
-    refreshMlDirectCardStatus();
-
-    setTimeout(initCharts, 100);
-  </script>
-</body>
-</html>
-
-"""
-    return HTMLResponse(content=html_template)
-      method: 'POST',
           headers: {{ 'Content-Type': 'application/json' }},
           body: JSON.stringify(body)
         }});
