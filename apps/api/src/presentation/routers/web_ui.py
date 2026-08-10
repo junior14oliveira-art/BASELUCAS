@@ -2133,11 +2133,21 @@ async def get_web_ui():
       }}
     }}
 
-    function syncWithBaseLinkerAPI() {{
-      _toast('Recarregando a página com o cache SQLite local (Mercado Livre). BaseLinker não é fonte de dados.', 'info');
-      setTimeout(function () {{ location.reload(); }}, 400);
+    async function syncWithBaseLinkerAPI() {{
+      const btn = document.querySelector('button[onclick="syncWithBaseLinkerAPI()"]');
+      const originalText = btn ? btn.innerHTML : '';
+      if (btn) btn.innerHTML = '<span class="material-icons rotating">sync</span> Sincronizando ML...';
+      _toast('Iniciando sincronização direta com o Mercado Livre...', 'info');
+      try {{
+        const res = await fetch('/api/v1/orders/sync-now', {{ method: 'POST' }});
+        if (!res.ok) throw new Error('Erro ' + res.status);
+        _toast('Sincronização concluída! Recarregando painel...', 'success');
+        setTimeout(() => location.reload(), 1500);
+      }} catch (e) {{
+        _toast('Falha ao sincronizar. Usando cache local.', 'error');
+        if (btn) btn.innerHTML = originalText;
+      }}
     }}
-
     async function syncMlFeedFromTutorials() {{
       const setBusy = (window.AppUx && AppUx.setBusyButtons) ? AppUx.setBusyButtons : null;
       if (setBusy) setBusy('[data-sync-btn]', true, 'Sincronizando…');
