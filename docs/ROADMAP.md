@@ -1,71 +1,51 @@
-# Roadmap: BASE ANTIGRAVITY (jrdev1 / 4M&C)
+# Roadmap para Conclusão do Pipeline 4M&C
 
-**Produto:** nosso hub estilo BaseLinker (pedidos, catálogo, expedição, financeiro local).  
-**Molde:** UI/UX inspirada no BaseLinker.  
-**Dados:** Mercado Livre via API 4MC read-only + SQLite local (`omnichannel_real.db`).
+Este é o mapa de batalha para finalizarmos 100% o motor do **Pipeline Assíncrono** (onde a burocracia corre solta enquanto o técnico trabalha sem pausas). 
 
-Skill: `.agents/skills/omnichannel-hub/SKILL.md` · Dados: `docs/DATA_SOURCE_ML_FEED.md` · API oficial ML: `docs/MERCADOLIVRE_API_STUDY.md` · Arquitetura: `docs/ARCHITECTURE.md` · Estudo BL (molde): `docs/BASELINKER_API_STUDY.md` · Bling/NF-e: `docs/BLING_API_STUDY.md` · Etiquetas: `docs/LABELS_ML.md`
+Aqui está a análise de tudo o que falta e a ordem de execução:
 
 ---
 
-## Quadro oficial de fases (fonte da verdade)
+## 🎯 ETAPA 1: Fundação do Chão de Fábrica (Gestão de Usuários)
+**Status:** 🟡 Pronto para iniciar (Foco 2)
 
-| Fase | Entrega | Status |
-|---|---|---|
-| **1 — APIs e Infra** | FastAPI + Next.js (KIRO) + bridge API ML 4MC | 🟢 **CONCLUÍDO** |
-| **2 — Conexão do Feed** | Sync `/ml/feed` + `/ml/orders` → SQLite → **Guia Pedidos → Lista de pedidos** em `/app` | 🟡 **QUASE FEITO** — lista + sync na UI; vazio honesto se upstream 0; falta só pedidos reais no bridge para “encher” a lista |
-| **3 — Bipagem Pick & Pack** | Scanner USB no galpão | 🔴 **PENDENTE** — não iniciar agora |
-| **4 — Impressão ZPL Direct** | Envio direto Zebra/Elgin | 🔴 **PENDENTE** — skeleton de etiquetas/preview já em `docs/LABELS_ML.md` (download ML ainda gated) |
-
-### Etiquetas / Declaração de Conteúdo (prep Fase 4)
-
-- **Hoje:** preview HTML local + gate 501/403 — `GET /api/v1/orders/{{id}}/label` e `/label/preview`
-- **Produção:** OAuth + `ML_READ_ONLY=false` + `GET /shipment_labels?response_type=pdf|zpl2`
-- Detalhe: **`docs/LABELS_ML.md`**
-
-```mermaid
-timeline
-    title BASE ANTIGRAVITY — Fases 1–4
-    Fase 1 : APIs e Infra : FastAPI + Next + ML 4MC
-    Fase 2 : Conexao do Feed : Sync → SQLite → Lista Pedidos
-    Fase 3 : Pick and Pack : Scanner USB galpao
-    Fase 4 : ZPL Direct : Zebra / Elgin
-```
-
-### Critérios de aceite — Fase 2
-
-- [x] URLs `ML_FEED_*` + `MLFeedSyncService` + SQLite
-- [x] `POST /api/v1/orders/sync-now` e botão na UI `/app`
-- [x] GETs de pedidos/dashboard **não** batem no 4MC a cada load
-- [x] Guia Pedidos (molde BaseLinker) com **Lista de pedidos** ligada ao cache local
-- [ ] Bridge 4MC com pedidos reais na conta (`total_orders_paid` / `paging.total` > 0) — **depende do upstream**; zero no bridge = lista vazia honesta + sync ok
-
-### Módulos UI (molde) — estado honesto
-
-| Módulo | O que é real | O que é placeholder |
-|---|---|---|
-| **Pedidos** | Lista + status + clientes derivados + CSV + sync | Faturas/NF, devoluções, e-mail/SMS, transferências, print |
-| **Produtos** | Lista SQLite + inventário resumido + CSV + sync | Ações automáticas, import |
-| **Financeiro** | **Financeiro detalhado** = relatório local (totais, status, dias, tabela) a partir de `RealOrderDB` | Bling/SEFAZ/conciliação — **não inventar** |
+Para o técnico poder trabalhar nos pedidos de forma independente no Kanban, ele precisa "existir" no sistema e "puxar" os pacotes para ele.
+- [ ] Construir a aba de Usuários/Equipe na Interface.
+- [ ] Ligar a UI com o CRUD de operadores (`/api/v1/operators`).
+- [ ] Implementar as permissões (Role): Administrador, Técnico (Montagem), Expedição (Separação).
+- [ ] Fazer com que os pedidos nas filas (ex: "Fila Técnico") fiquem vinculados ao usuário logado.
 
 ---
 
-## Visão longa (omnichannel)
+## 🎯 ETAPA 2: A "Macro Fiscal" (Integração Bling)
+**Status:** 🔴 Não Iniciado (Foco 3)
 
-Fases aspiracionais depois da 4: multi-canal, fiscal (Bling/SEFAZ), WhatsApp/CRM, financeiro ERP, AssistantAgent com LLM.  
-**Não** marcar como concluídas.
-
-**Bling / NF-e (pré-config 08/2026):** env + client stub + router `/api/v1/bling/*` + tiles honestos em Integrações.  
-Emissão real e sync ERP = só após homologação (`BLING_READ_ONLY=false` + `NFE_EMIT_ENABLED=true`). Detalhe: `docs/BLING_API_STUDY.md`.
-
-Detalhe de paridade de molde UI: `docs/PIPELINE_PROMPTS_ROADMAP.md` — útil para UX, **não** redefine a fonte de dados.
+Esta etapa automatiza a burocracia chata e tira o ser humano do processo de emitir notas.
+- [ ] Criar tabela no SQLite (`BlingConfigDB`) para armazenar o Token OAuth do Bling.
+- [ ] Criar a rota no backend para receber a venda do ML e dar o `POST` para o Bling gerando o **Pedido de Venda**.
+- [ ] Configurar o disparo automático: ao receber a confirmação de pagamento do Mercado Livre, o sistema manda para o Bling e comanda a geração da **NF-e**.
 
 ---
 
-## O que não fazer no roadmap curto
+## 🎯 ETAPA 3: O Gatilho da Logística (Webhooks e ZPL)
+**Status:** 🔴 Não Iniciado (Foco 4)
 
-- Tratar BaseLinker API como produção.
-- Escrever estoque/preço no ML sem aprovação.
-- Iniciar Fase 3 (pick&pack) ou Fase 4 (ZPL) antes da Fase 2 estável.
-- Inventar dados financeiros/fiscais (Bling/SEFAZ) no relatório.
-- Polling contínuo do feed (cache + sync explícito).
+Aqui é onde o sistema "ouve" o Bling e busca a etiqueta no Mercado Livre.
+- [ ] Configurar o **Webhook do Bling** no nosso FastAPI (uma rota `POST /webhooks/bling/nfe`) para o Bling nos avisar assim que a Sefaz aprovar a nota.
+- [ ] Ao receber a Chave de Acesso no webhook, o sistema injeta a chave automaticamente na API do Mercado Livre (`/billing_info`).
+- [ ] O sistema baixa a etiqueta **ZPL** (Mercado Envios) em background e a deixa engatilhada, mudando o status daquela caixa de "Aguardando Nota" para "Pronto para Bipagem".
+
+---
+
+## 🎯 ETAPA 4: A Convergência Física (Pick & Pack + Impressão)
+**Status:** 🔴 Não Iniciado (Foco 5 - Final)
+
+O ápice do pipeline: o encontro entre a caixa física (que o técnico já embalou na Etapa 1) e a Etiqueta ZPL (que a Etapa 3 acabou de destravar).
+- [ ] Habilitar o campo de busca (Bipagem) para o Scanner USB na aba de expedição.
+- [ ] Criar a lógica: Ao "bipar" o código de barras, o sistema verifica se a Etiqueta ZPL está engatilhada.
+- [ ] Configurar comunicação via CUPS/Raw Print para enviar o código ZPL direto para as impressoras térmicas (Zebra/Elgin) da bancada.
+
+---
+
+> [!NOTE]
+> Você reparou que a ETAPA 1 (que é o trabalho humano do técnico) é totalmente isolada das ETAPAS 2 e 3 (que são burocráticas)? Isso garante que se a Sefaz ou o Bling caírem, a sua oficina continua montando computadores sem parar.
