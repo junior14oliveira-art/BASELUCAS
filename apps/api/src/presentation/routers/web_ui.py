@@ -1026,7 +1026,6 @@ async def get_web_ui():
     let currentOperatorId = null;
 
     let activeStatusFilter = 'Todos os pedidos';
-    let activeChannelFilter = 'All';
     let globalSearchTerm = '';
     let selectedOrderIds = new Set();
 
@@ -1045,14 +1044,7 @@ async def get_web_ui():
       const fields = [order.id, order.external_id, order.customer, order.email, order.phone, order.item, order.sku, order.channel, order.status];
       return fields.some(f => f && String(f).toLowerCase().includes(term));
     }}
-
-    function filterByChannel(channel) {{
-      activeChannelFilter = channel;
-      switchTab('orders');
-      renderOrdersTable();
-    }}
-
-    function openOrderModal(mode = 'NEW') {{
+function openOrderModal(mode = 'NEW') {{
       _toast('Adicionar / editar pedido manual ainda não está disponível. Os pedidos vêm do sync Mercado Livre.', 'warning');
     }}
 
@@ -1574,10 +1566,7 @@ async def get_web_ui():
             return false;
           }}
         }}
-
-        if (activeChannelFilter && activeChannelFilter !== 'All' && o.channel !== activeChannelFilter) return false;
-
-        if (dateFrom) {{
+if (dateFrom) {{
           const dFrom = new Date(dateFrom + 'T00:00:00');
           const od = parseOrderDate(o.date);
           if (od && od < dFrom) return false;
