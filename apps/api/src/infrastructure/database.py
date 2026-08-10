@@ -253,7 +253,12 @@ class BlingNfeWebhookEventDB(Base):
 
 async def init_db():
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+        try:
+            await conn.run_sync(Base.metadata.create_all)
+        except Exception as e:
+            # Concurrent create_all under --reload can race on new tables.
+            if "already exists" not in str(e).lower():
+                raise
         # SQLite create_all não adiciona colunas novas em tabelas já existentes.
         await conn.run_sync(_ensure_real_products_columns)
         await conn.run_sync(_ensure_real_orders_columns)
@@ -279,7 +284,14 @@ def _ensure_columns(sync_conn, table: str, alters: list) -> None:
     existing = {r[1] for r in rows} if rows else set()
     for col, sql in alters:
         if col not in existing:
-            sync_conn.exec_driver_sql(sql)
+            try:
+                sync_conn.exec_driver_sql(sql)
+            except Exception as e:
+                # Concurrent init_db / reload: column may already exist.
+                msg = str(e).lower()
+                if "duplicate column" in msg or "already exists" in msg:
+                    continue
+                raise
 
 
 def _ensure_real_products_columns(sync_conn) -> None:

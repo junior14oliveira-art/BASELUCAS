@@ -14,6 +14,7 @@ from typing import Any, Dict, Optional
 from fastapi import APIRouter, BackgroundTasks, Query, Request
 from sqlalchemy import select
 
+from src.config import settings
 from src.infrastructure.database import BlingNfeWebhookEventDB, async_session, init_db
 from src.infrastructure import logistics_unlock_service as logistics
 
@@ -120,7 +121,7 @@ async def get_order_logistics_state(order_id: str):
             "status_name": order.status_name,
             "nfe_access_key_suffix": key[-8:] if len(key) >= 8 else key,
             "ml_billing_inject_status": order.ml_billing_inject_status,
-            "ml_read_only": True,  # hint; valor real vem do settings no service
+            "ml_read_only": bool(settings.ML_READ_ONLY),
             "zpl": {
                 "armed": bool(order.zpl_armed),
                 "status": order.zpl_status,
