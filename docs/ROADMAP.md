@@ -4,7 +4,9 @@
 > **Fonte da verdade do roadmap de produção.**  
 > As entregas oficiais são as **Etapas 1–4** abaixo (chão de fábrica + fiscal + logística + convergência física).  
 > Diagrama paralelo: `docs/PIPELINE_ASSINCRONO.md`.  
-> Skill: `.agents/skills/omnichannel-hub/SKILL.md`.
+> Skill: `.agents/skills/omnichannel-hub/SKILL.md`.  
+> Vocabulário alinhado em 10/08/2026: “Fases 1–4” = histórico; “Etapas 1–4” = plano oficial.  
+> Vocabulário alinhado em 10/08/2026: “Fases 1–4” = histórico; “Etapas 1–4” = plano oficial.
 
 Este é o mapa de batalha para finalizarmos 100% o motor do **Pipeline Assíncrono** (onde a burocracia corre solta enquanto o técnico trabalha sem pausas).
 
