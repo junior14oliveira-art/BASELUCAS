@@ -500,18 +500,29 @@ async def get_web_ui():
             <h3 style="font-size:1.1rem; font-weight:800; color:#fff; margin-bottom:12px; display:flex; align-items:center; gap:8px;">
               <span class="material-icons" style="color:#0066FF">storefront</span> Canais & Marketplaces Conectados
             </h3>
-            <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:16px; margin-top:16px;">
+            <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:8px;">
+              Clique em <strong style="color:#FFF;">Bling</strong> ou <strong style="color:#FFF;">ML direto</strong> para informar credenciais. O card 4M&C é o feed read-only (pedidos).
+            </p>
+            <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(220px, 1fr)); gap:16px; margin-top:16px;">
               <div style="background:#14171d; padding:16px; border-radius:8px; border:1px solid var(--border);">
                 <strong style="color:#FFF;">Mercado Livre (4M&C)</strong>
-                <p style="font-size:0.75rem; color:var(--green); margin-top:4px;">● Conectado (API Read-Only)</p>
+                <p style="font-size:0.72rem; color:var(--text-muted); margin-top:2px;">Feed bridge — pedidos/produtos</p>
+                <p style="font-size:0.75rem; color:var(--green); margin-top:6px;">● Conectado (API Read-Only)</p>
               </div>
-              <div style="background:#14171d; padding:16px; border-radius:8px; border:1px solid var(--border);">
-                <strong style="color:#FFF;">BaseLinker API</strong>
-                <p style="font-size:0.75rem; color:var(--green); margin-top:4px;">● Conectado (Token Ativo)</p>
+              <div role="button" tabindex="0" onclick="openMlDirectModal()" onkeydown="if(event.key==='Enter')openMlDirectModal()" style="background:#14171d; padding:16px; border-radius:8px; border:1px solid var(--border); cursor:pointer; transition:border-color .15s;" onmouseover="this.style.borderColor='#FFE600'" onmouseout="this.style.borderColor='var(--border)'">
+                <strong style="color:#FFF;">Mercado Livre direto</strong>
+                <p style="font-size:0.72rem; color:var(--text-muted); margin-top:2px;">OAuth App ID / Secret (oficial)</p>
+                <p id="ml-direct-card-status" style="font-size:0.75rem; color:var(--text-muted); margin-top:6px;">● Carregando…</p>
               </div>
-              <div style="background:#14171d; padding:16px; border-radius:8px; border:1px solid var(--border);">
+              <div role="button" tabindex="0" onclick="openBlingModal()" onkeydown="if(event.key==='Enter')openBlingModal()" style="background:#14171d; padding:16px; border-radius:8px; border:1px solid var(--border); cursor:pointer; transition:border-color .15s;" onmouseover="this.style.borderColor='#F59E0B'" onmouseout="this.style.borderColor='var(--border)'">
                 <strong style="color:#FFF;">Bling ERP</strong>
-                <p style="font-size:0.75rem; color:var(--amber); margin-top:4px;">● Configurado (Aguardando NF-e)</p>
+                <p style="font-size:0.72rem; color:var(--text-muted); margin-top:2px;">OAuth v3 — Macro Fiscal</p>
+                <p id="bling-card-status" style="font-size:0.75rem; color:var(--amber); margin-top:6px;">● Carregando…</p>
+              </div>
+              <div style="background:#14171d; padding:16px; border-radius:8px; border:1px solid var(--border); opacity:0.85;">
+                <strong style="color:#FFF;">BaseLinker API</strong>
+                <p style="font-size:0.72rem; color:var(--text-muted); margin-top:2px;">Só molde / estudo de UI</p>
+                <p style="font-size:0.75rem; color:var(--text-muted); margin-top:6px;">● Estudo (não é fonte de pedidos)</p>
               </div>
             </div>
           </div>
@@ -572,6 +583,48 @@ async def get_web_ui():
           </tbody>
         </table>
       </div>
+      <div style="display:flex; justify-content:flex-end;">
+        <button type="button" class="btn-add-order" style="background:var(--border);" onclick="closeOperatorModal()">Fechar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal: Conectar Bling ERP -->
+  <div class="modal-overlay" id="bling-modal">
+    <div class="modal-box" style="width:560px; background:#0F172A; border:1px solid #334155;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+        <h3 style="margin:0; font-weight:800; color:#FFF;">🔑 Conectar Bling ERP (API v3)</h3>
+        <button type="button" onclick="closeBlingModal()" style="background:none; border:none; color:#94A3B8; font-size:1.3rem; cursor:pointer;">✖</button>
+      </div>
+      <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:12px;">
+        Cadastre o app em <strong style="color:#F59E0B;">developer.bling.com.br</strong>.
+        Redirect URI: <code style="color:#38BDF8;">http://localhost:8000/api/v1/bling/callback</code>
+      </p>
+      <p id="bling-modal-status" style="font-size:0.78rem; color:var(--amber); margin-bottom:14px;">Status: —</p>
+
+      <label style="font-size:0.72rem; font-weight:700; color:#94A3B8;">CLIENT ID</label>
+      <input type="text" id="bling-client-id" placeholder="Client ID do aplicativo Bling" style="width:100%; margin:4px 0 12px; padding:10px; border-radius:6px; border:1px solid var(--border); background:var(--bg); color:var(--text); box-sizing:border-box;">
+
+      <label style="font-size:0.72rem; font-weight:700; color:#94A3B8;">CLIENT SECRET</label>
+      <input type="password" id="bling-client-secret" placeholder="Client Secret" style="width:100%; margin:4px 0 12px; padding:10px; border-radius:6px; border:1px solid var(--border); background:var(--bg); color:var(--text); box-sizing:border-box;">
+
+      <details style="margin-bottom:14px;">
+        <summary style="cursor:pointer; color:#38BDF8; font-size:0.8rem; font-weight:700;">Já tenho access token (colar manualmente)</summary>
+        <label style="font-size:0.72rem; font-weight:700; color:#94A3B8; display:block; margin-top:10px;">ACCESS TOKEN</label>
+        <input type="password" id="bling-access-token" placeholder="access_token" style="width:100%; margin:4px 0 10px; padding:10px; border-radius:6px; border:1px solid var(--border); background:var(--bg); color:var(--text); box-sizing:border-box;">
+        <label style="font-size:0.72rem; font-weight:700; color:#94A3B8;">REFRESH TOKEN (opcional)</label>
+        <input type="password" id="bling-refresh-token" placeholder="refresh_token" style="width:100%; margin:4px 0 0; padding:10px; border-radius:6px; border:1px solid var(--border); background:var(--bg); color:var(--text); box-sizing:border-box;">
+      </details>
+
+      <div style="display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end;">
+        <button type="button" class="btn-add-order" style="background:var(--border);" onclick="closeBlingModal()">Cancelar</button>
+        <button type="button" class="btn-add-order" style="background:#334155;" onclick="clearBlingConnection()">Limpar tokens</button>
+        <button type="button" class="btn-add-order" style="background:#0EA5E9;" onclick="testBlingConnection()">Testar</button>
+        <button type="button" class="btn-add-order" style="background:#10B981;" onclick="saveBlingCredentials()">Salvar API</button>
+        <button type="button" class="btn-add-order" onclick="startBlingOAuth()">OAuth Bling ↗</button>
+      </div>
+    </div>
+  </div>
 
   <!-- Modal: Detalhes do Produto -->
   <div class="modal-overlay" id="product-detail-modal">
@@ -676,6 +729,28 @@ async def get_web_ui():
           cb.checked = !cb.checked;
           toggleSelectAllOrders(cb.checked);
         }}
+        return;
+      }}
+      if (action === 'nfe') {{
+        const ids = Array.from(selectedOrderIds);
+        if (!ids.length) {{
+          if (window.AppUx) AppUx.showToast('Selecione ao menos um pedido.', 'info');
+          else alert('Selecione ao menos um pedido.');
+          return;
+        }}
+        (async () => {{
+          let ok = 0, blocked = 0;
+          for (const id of ids) {{
+            try {{
+              const r = await fetch(`/api/v1/bling/orders/${{encodeURIComponent(id)}}/push`, {{ method: 'POST' }});
+              const j = await r.json();
+              if (j.ok) ok++; else blocked++;
+            }} catch (e) {{ blocked++; }}
+          }}
+          const msg = `Bling: ${{ok}} processado(s), ${{blocked}} bloqueado(s)/erro. NF-e só com NFE_EMIT_ENABLED=true.`;
+          if (window.AppUx) AppUx.showToast(msg, ok ? 'success' : 'info');
+          else alert(msg);
+        }})();
         return;
       }}
       const selCount = selectedOrderIds.size;
@@ -1320,6 +1395,113 @@ async def get_web_ui():
       renderProductsTable();
     }}
 
+    async function refreshBlingCardStatus() {{
+      const el = document.getElementById('bling-card-status');
+      const modalStatus = document.getElementById('bling-modal-status');
+      try {{
+        const res = await fetch('/api/v1/bling/status');
+        const data = await res.json();
+        const label = data.ui_label || 'Status desconhecido';
+        const color = data.ui_color === 'green' ? 'var(--green)' : (data.ui_color === 'muted' ? 'var(--text-muted)' : 'var(--amber)');
+        if (el) {{
+          el.style.color = color;
+          el.innerText = '● ' + label;
+        }}
+        if (modalStatus) {{
+          modalStatus.style.color = color;
+          modalStatus.innerText = 'Status: ' + label + (data.client_id_masked ? ' · App ' + data.client_id_masked : '');
+        }}
+        return data;
+      }} catch (e) {{
+        if (el) {{
+          el.style.color = 'var(--amber)';
+          el.innerText = '● Não foi possível ler o status Bling';
+        }}
+        return null;
+      }}
+    }}
+
+    function openBlingModal() {{
+      const modal = document.getElementById('bling-modal');
+      if (modal) modal.classList.add('open');
+      refreshBlingCardStatus();
+    }}
+
+    function closeBlingModal() {{
+      const modal = document.getElementById('bling-modal');
+      if (modal) modal.classList.remove('open');
+    }}
+
+    function closeOperatorModal() {{
+      const modal = document.getElementById('operator-modal');
+      if (modal) modal.classList.remove('open');
+    }}
+
+    async function saveBlingCredentials() {{
+      const clientId = (document.getElementById('bling-client-id') || {{}}).value || '';
+      const clientSecret = (document.getElementById('bling-client-secret') || {{}}).value || '';
+      const accessToken = (document.getElementById('bling-access-token') || {{}}).value || '';
+      const refreshToken = (document.getElementById('bling-refresh-token') || {{}}).value || '';
+      if (!clientId.trim() || !clientSecret.trim()) {{
+        alert('Informe Client ID e Client Secret do app Bling.');
+        return;
+      }}
+      try {{
+        const res = await fetch('/api/v1/bling/credentials', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify({{ client_id: clientId.trim(), client_secret: clientSecret.trim() }})
+        }});
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || data.message || 'Falha ao salvar credenciais');
+        if (accessToken.trim()) {{
+          const res2 = await fetch('/api/v1/bling/tokens', {{
+            method: 'POST',
+            headers: {{ 'Content-Type': 'application/json' }},
+            body: JSON.stringify({{
+              access_token: accessToken.trim(),
+              refresh_token: refreshToken.trim()
+            }})
+          }});
+          const data2 = await res2.json();
+          if (!res2.ok) throw new Error(data2.detail || data2.message || 'Falha ao salvar tokens');
+        }}
+        alert(data.message || 'Credenciais Bling salvas.');
+        await refreshBlingCardStatus();
+        if (typeof showToast === 'function') showToast('Bling: API salva', 'success');
+      }} catch (e) {{
+        alert('Erro ao salvar Bling: ' + (e.message || e));
+      }}
+    }}
+
+    function startBlingOAuth() {{
+      window.location.href = '/api/v1/bling/auth';
+    }}
+
+    async function testBlingConnection() {{
+      try {{
+        const res = await fetch('/api/v1/bling/test', {{ method: 'POST' }});
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || data.message || 'Falha no teste');
+        alert(data.message || 'Token Bling válido.');
+        await refreshBlingCardStatus();
+      }} catch (e) {{
+        alert('Teste Bling: ' + (e.message || e));
+      }}
+    }}
+
+    async function clearBlingConnection() {{
+      if (!confirm('Limpar tokens Bling desta conta?')) return;
+      try {{
+        const res = await fetch('/api/v1/bling/connection', {{ method: 'DELETE' }});
+        const data = await res.json();
+        alert(data.message || 'Conexão limpa.');
+        await refreshBlingCardStatus();
+      }} catch (e) {{
+        alert('Erro: ' + (e.message || e));
+      }}
+    }}
+
     // Init UI on load
     try {{
       const savedStatus = localStorage.getItem('active_status_filter');
@@ -1333,8 +1515,19 @@ async def get_web_ui():
     let initialTab = 'orders';
     try {{
       initialTab = localStorage.getItem('active_tab') || 'orders';
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('tab')) initialTab = params.get('tab');
+      if (params.get('bling') === 'ok') {{
+        initialTab = 'marketplaces';
+        setTimeout(() => alert('Bling OAuth concluído — tokens salvos.'), 400);
+      }}
+      if (params.get('bling_error')) {{
+        initialTab = 'marketplaces';
+        setTimeout(() => alert('Erro Bling OAuth: ' + params.get('bling_error')), 400);
+      }}
     }} catch(e) {{}}
     switchTab(initialTab);
+    refreshBlingCardStatus();
 
     setTimeout(initCharts, 100);
   </script>

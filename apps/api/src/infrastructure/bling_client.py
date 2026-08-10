@@ -71,9 +71,24 @@ class _RateLimiter:
 _rate_limiter = _RateLimiter()
 
 
-def is_app_configured() -> bool:
-    """True se client_id/secret existem no .env (ainda sem token = Aguardando OAuth)."""
-    return bool((settings.BLING_CLIENT_ID or "").strip() and (settings.BLING_CLIENT_SECRET or "").strip())
+def resolve_app_credentials(row: Any = None) -> tuple[str, str]:
+    """Client ID/Secret: preferência pela linha SQLite; fallback .env/settings."""
+    cid = ""
+    csec = ""
+    if row is not None:
+        cid = (getattr(row, "client_id", None) or "").strip()
+        csec = (getattr(row, "client_secret", None) or "").strip()
+    if not cid:
+        cid = (settings.BLING_CLIENT_ID or "").strip()
+    if not csec:
+        csec = (settings.BLING_CLIENT_SECRET or "").strip()
+    return cid, csec
+
+
+def is_app_configured(row: Any = None) -> bool:
+    """True se client_id/secret existem (SQLite ou .env). Sem token = Aguardando OAuth."""
+    cid, csec = resolve_app_credentials(row)
+    return bool(cid and csec)
 
 
 def bling_read_only() -> bool:
@@ -84,15 +99,16 @@ def nfe_emit_enabled() -> bool:
     return bool(getattr(settings, "NFE_EMIT_ENABLED", False))
 
 
-def build_authorize_url(*, state: str, redirect_uri: Optional[str] = None) -> str:
-    if not is_app_configured():
+def build_authorize_url(*, state: str, redirect_uri: Optional[str] = None, row: Any = None) -> str:
+    cid, _csec = resolve_app_credentials(row)
+    if not is_app_configured(row):
         raise BlingAuthError(
-            "BLING_CLIENT_ID / BLING_CLIENT_SECRET ausentes no .env — "
-            "cadastre o app em developer.bling.com.br."
+            "BLING_CLIENT_ID / BLING_CLIENT_SECRET ausentes — "
+            "informe no card Bling da UI ou no .env (developer.bling.com.br)."
         )
     params = {
         "response_type": "code",
-        "client_id": settings.BLING_CLIENT_ID.strip(),
+        "client_id": cid,
         "state": state,
     }
     # redirect_uri é configurado no painel do app Bling; alguns apps aceitam na query
@@ -102,8 +118,9 @@ def build_authorize_url(*, state: str, redirect_uri: Optional[str] = None) -> st
     return f"{BLING_OAUTH_BASE}/authorize?{urlencode(params)}"
 
 
-def _basic_auth_header() -> str:
-    raw = f"{settings.BLING_CLIENT_ID.strip()}:{settings.BLING_CLIENT_SECRET.strip()}"
+def _basic_auth_header(row: Any = None) -> str:
+    cid, csec = resolve_app_credentials(row)
+    raw = f"{cid}:{csec}"
     return "Basic " + base64.b64encode(raw.encode()).decode()
 
 

@@ -118,19 +118,69 @@ def _handle_ml_error(exc: MercadoLivreError) -> HTTPException:
 # Status da integração
 # ---------------------------------------------------------------------------
 
+def _mask_secret(value: str, keep: int = 4) -> str:
+    v = (value or "").strip()
+    if not v:
+        return ""
+    if len(v) <= keep:
+        return "*" * len(v)
+    return ("*" * max(len(v) - keep, 4)) + v[-keep:]
+
+
+class MLCredentialsBody(BaseModel):
+    client_id: str = Field(..., min_length=1, description="App ID (ML_CLIENT_ID)")
+    client_secret: str = Field(..., min_length=1, description="Secret Key")
+    redirect_uri: Optional[str] = None
+
+
+async def _hydrate_ml_app_from_db() -> None:
+    """Carrega App ID/Secret salvos via UI (SyncMeta) se .env estiver vazio."""
+    from src.infrastructure.database import SyncMetaDB
+
+    await init_db()
+    async with async_session() as session:
+        mapping = {
+            "ml_oauth.client_id": "ML_CLIENT_ID",
+            "ml_oauth.client_secret": "ML_CLIENT_SECRET",
+            "ml_oauth.redirect_uri": "ML_REDIRECT_URI",
+        }
+        for meta_key, attr in mapping.items():
+            current = (getattr(settings, attr, None) or "").strip()
+            if current:
+                continue
+            row = await session.get(SyncMetaDB, meta_key)
+            if row and (row.value or "").strip():
+                setattr(settings, attr, row.value.strip())
+
+
 @router.get("/status")
 async def integration_status():
     """Diz se o app já foi configurado e quais contas estão conectadas."""
-    await init_db()
+    await _hydrate_ml_app_from_db()
     async with async_session() as session:
         result = await session.execute(select(MLAccountDB))
         accounts = result.scalars().all()
 
+    active = [a for a in accounts if a.is_active and (a.access_token or "").strip()]
+    app_ok = is_configured()
+    if active:
+        ui_status, ui_label, ui_color = "connected", "Conectado (OAuth direto)", "green"
+    elif app_ok:
+        ui_status, ui_label, ui_color = "awaiting", "App configurado — conclua OAuth", "amber"
+    else:
+        ui_status, ui_label, ui_color = "not_configured", "Não configurado — clique para conectar", "muted"
+
     return {
-        "configured": is_configured(),
+        "configured": app_ok,
         "site_id": settings.ML_SITE_ID,
         "redirect_uri": settings.ML_REDIRECT_URI,
-        "connected_accounts": len(accounts),
+        "client_id_masked": _mask_secret(settings.ML_CLIENT_ID or "", 6),
+        "has_client_secret": bool((settings.ML_CLIENT_SECRET or "").strip()),
+        "ml_read_only": bool(getattr(settings, "ML_READ_ONLY", True)),
+        "connected_accounts": len(active),
+        "ui_status": ui_status,
+        "ui_label": ui_label,
+        "ui_color": ui_color,
         "accounts": [
             {
                 "id": a.id,
@@ -143,9 +193,43 @@ async def integration_status():
             for a in accounts
         ],
         "setup_hint": (
-            None if is_configured()
-            else "Preencha ML_CLIENT_ID e ML_CLIENT_SECRET no arquivo apps/api/.env"
+            None if app_ok
+            else "Informe App ID / Secret no card Mercado Livre direto ou em apps/api/.env"
         ),
+        "note": "Separado do feed 4M&C — este é OAuth nativo da API oficial.",
+    }
+
+
+@router.post("/credentials")
+async def save_ml_credentials(body: MLCredentialsBody):
+    """Salva App ID / Secret do DevCenter (runtime + SyncMeta; não commit de secrets)."""
+    await init_db()
+    settings.ML_CLIENT_ID = body.client_id.strip()
+    settings.ML_CLIENT_SECRET = body.client_secret.strip()
+    if body.redirect_uri and body.redirect_uri.strip():
+        settings.ML_REDIRECT_URI = body.redirect_uri.strip()
+
+    from src.infrastructure.database import SyncMetaDB
+
+    async with async_session() as session:
+        for key, value in (
+            ("ml_oauth.client_id", settings.ML_CLIENT_ID),
+            ("ml_oauth.client_secret", settings.ML_CLIENT_SECRET),
+            ("ml_oauth.redirect_uri", settings.ML_REDIRECT_URI),
+        ):
+            row = await session.get(SyncMetaDB, key)
+            if not row:
+                row = SyncMetaDB(key=key, value=value)
+                session.add(row)
+            else:
+                row.value = value
+                row.updated_at = datetime.now()
+        await session.commit()
+
+    return {
+        "ok": True,
+        "message": "Credenciais ML direto salvas. Inicie o OAuth para conectar a conta.",
+        "status": await integration_status(),
     }
 
 
@@ -156,10 +240,11 @@ async def integration_status():
 @router.get("/auth/url")
 async def get_authorization_url(use_pkce: bool = Query(True, description="Usar PKCE (recomendado)")):
     """Gera a URL para o vendedor autorizar o app."""
+    await _hydrate_ml_app_from_db()
     if not is_configured():
         raise HTTPException(
             status_code=412,
-            detail="ML_CLIENT_ID/ML_CLIENT_SECRET não configurados. Preencha apps/api/.env.",
+            detail="ML_CLIENT_ID/ML_CLIENT_SECRET não configurados. Preencha no card ML direto ou apps/api/.env.",
         )
 
     state = secrets.token_urlsafe(24)

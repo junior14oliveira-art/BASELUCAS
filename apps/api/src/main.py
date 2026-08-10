@@ -1,9 +1,14 @@
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+
 from src.config import settings
 from src.presentation.routers import (
     dashboard, orders, products, marketplaces, assistant, web_ui, automation_rules,
-    inventory_documents, shipments, crm, invoices, external_connect, mercadolivre, operators
+    inventory_documents, shipments, crm, invoices, external_connect, mercadolivre, operators,
+    bling, webhooks,
 )
 
 app = FastAPI(
@@ -24,6 +29,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Static UX helpers (toasts etc.) — /app/static/app_ux.js
+_STATIC_DIR = Path(__file__).resolve().parent / "presentation" / "static"
+if _STATIC_DIR.is_dir():
+    app.mount("/app/static", StaticFiles(directory=str(_STATIC_DIR)), name="app_static")
+
 # Register Routers
 app.include_router(web_ui.router)
 app.include_router(dashboard.router, prefix=settings.API_V1_STR)
@@ -39,6 +49,11 @@ app.include_router(invoices.router, prefix=settings.API_V1_STR)
 app.include_router(external_connect.router, prefix=settings.API_V1_STR)
 app.include_router(mercadolivre.router, prefix=settings.API_V1_STR)
 app.include_router(operators.router, prefix=settings.API_V1_STR)
+app.include_router(operators.users_alias_router, prefix=settings.API_V1_STR)
+app.include_router(bling.router, prefix=settings.API_V1_STR)
+# Etapa 3 — /webhooks/bling/nfe e /api/v1/webhooks/bling/nfe (paths absolutos no router)
+app.include_router(webhooks.router)
+
 
 @app.get("/api-status")
 async def api_status():

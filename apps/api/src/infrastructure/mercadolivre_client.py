@@ -50,6 +50,18 @@ class MercadoLivreAuthError(MercadoLivreError):
 class MercadoLivreReadOnlyError(MercadoLivreError):
     """Operação bloqueada porque a integração está em modo somente leitura."""
 
+    def __init__(self, message_or_method: str, path: str = "", **kwargs: Any):
+        if path:
+            message = (
+                f"ML_READ_ONLY=true — bloqueado {message_or_method} {path}. "
+                "Defina ML_READ_ONLY=false apenas após homologação explícita."
+            )
+            payload = {"method": message_or_method, "path": path, "gated": True}
+        else:
+            message = message_or_method
+            payload = kwargs.get("payload") or {"gated": True}
+        super().__init__(message, status_code=int(kwargs.get("status_code") or 403), payload=payload)
+
 
 class _RateLimiter:
     """Limitador simples de chamadas concorrentes + intervalo mínimo entre requisições.
@@ -448,12 +460,47 @@ class MercadoLivreClient:
         return await self._request("GET", f"/shipments/{shipment_id}")
 
     async def get_shipment_labels(self, shipment_ids: List[str], response_type: str = "pdf") -> bytes:
-        """Baixa etiquetas de envio. ``response_type``: ``pdf`` ou ``zpl2`` (impressão térmica)."""
+        """Baixa etiquetas de envio. ``response_type``: ``pdf`` ou ``zpl2`` (impressão térmica).
+
+        Endpoint oficial ME2: ``GET /shipment_labels``.
+        """
         return await self._request(
-            "GET", "/shipments/labels",
+            "GET", "/shipment_labels",
             params={"shipment_ids": ",".join(shipment_ids), "response_type": response_type},
             raw=True,
         )
+
+    async def inject_nfe_billing_info(
+        self,
+        order_id: str,
+        access_key: str,
+        *,
+        allow_write: bool = False,
+        extra: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Injeta a Chave de Acesso da NF-e no billing_info do pedido ML.
+
+        Write gated por ``ML_READ_ONLY`` (default true). Em produção homologada:
+        ``ML_READ_ONLY=false`` e ``allow_write=True``.
+
+        Stub documentado: com gate ativo levanta ``MercadoLivreReadOnlyError`` —
+        o pipeline local ainda grava a chave e pode engatilhar ZPL assim que o
+        GET de etiqueta for possível.
+        """
+        if settings.ML_READ_ONLY and not allow_write:
+            raise MercadoLivreReadOnlyError("POST", f"/orders/{order_id}/billing_info")
+
+        key = (access_key or "").strip()
+        body: Dict[str, Any] = {
+            # Formato pragmático para integradores BR (chave 44 dígitos).
+            "nfe": {"key": key},
+            "invoice_key": key,
+            "doc_type": "NFE",
+            "doc_number": key,
+        }
+        if extra:
+            body.update(extra)
+        return await self._request("POST", f"/orders/{order_id}/billing_info", json_body=body)
 
     async def get_fulfillment_stock(self, user_id: Optional[int] = None) -> Dict[str, Any]:
         """Estoque armazenado no Full (fulfillment do Mercado Livre)."""

@@ -42,6 +42,12 @@ class RealOrderDB(Base):
     buyer_doc: Mapped[str] = mapped_column(String(50), default="")  # CPF/CNPJ se bridge expor
     pack_id: Mapped[str] = mapped_column(String(50), default="")
     enrichment_json: Mapped[str] = mapped_column(Text, default="{}")
+    # Pickup local (Etapa 1 — filas pessoais vinculadas ao operador)
+    picked_by: Mapped[str] = mapped_column(String(255), default="")
+    picked_by_id: Mapped[int] = mapped_column(Integer, default=0)
+    picked_from_status_id: Mapped[int] = mapped_column(Integer, default=0)
+    picked_from_status_name: Mapped[str] = mapped_column(String(255), default="")
+    picked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     # Macro Fiscal (Bling) — Etapa 2
     bling_pedido_id: Mapped[str] = mapped_column(String(50), default="")
     bling_nfe_id: Mapped[str] = mapped_column(String(50), default="")
@@ -214,6 +220,9 @@ class BlingConfigDB(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     account_key: Mapped[str] = mapped_column(String(50), unique=True, index=True, default="4mc")
     account_label: Mapped[str] = mapped_column(String(255), default="Bling 4M&C")
+    # Credenciais do app (developer.bling.com.br) — editáveis na UI /app
+    client_id: Mapped[str] = mapped_column(Text, default="")
+    client_secret: Mapped[str] = mapped_column(Text, default="")
     access_token: Mapped[str] = mapped_column(Text, default="")
     refresh_token: Mapped[str] = mapped_column(Text, default="")
     # Epoch em segundos — access_token Bling costuma durar ~6h
@@ -226,12 +235,29 @@ class BlingConfigDB(Base):
     last_error: Mapped[str] = mapped_column(Text, default="")
 
 
+class BlingNfeWebhookEventDB(Base):
+    """Log de webhooks Bling NF-e (SEFAZ) — ACK rápido + reprocessamento."""
+    __tablename__ = "bling_nfe_webhook_events"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event_name: Mapped[str] = mapped_column(String(100), default="", index=True)
+    bling_nfe_id: Mapped[str] = mapped_column(String(50), default="", index=True)
+    order_id: Mapped[str] = mapped_column(String(100), default="", index=True)
+    nfe_access_key: Mapped[str] = mapped_column(String(60), default="")
+    processed: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    error: Mapped[str] = mapped_column(Text, default="")
+    result_json: Mapped[str] = mapped_column(Text, default="{}")
+    payload_json: Mapped[str] = mapped_column(Text, default="{}")
+    received_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    processed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         # SQLite create_all não adiciona colunas novas em tabelas já existentes.
         await conn.run_sync(_ensure_real_products_columns)
         await conn.run_sync(_ensure_real_orders_columns)
+        await conn.run_sync(_ensure_bling_config_columns)
 
 
 class OperatorDB(Base):
@@ -239,7 +265,7 @@ class OperatorDB(Base):
     __tablename__ = "operators"
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(255), index=True)
-    role: Mapped[str] = mapped_column(String(100), default="Técnico")
+    role: Mapped[str] = mapped_column(String(100), default="Técnico (Montagem)")
     email: Mapped[str] = mapped_column(String(255), default="")
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
@@ -298,5 +324,22 @@ def _ensure_real_orders_columns(sync_conn) -> None:
             ("zpl_content", "ALTER TABLE real_orders ADD COLUMN zpl_content TEXT DEFAULT ''"),
             ("nfe_access_key", "ALTER TABLE real_orders ADD COLUMN nfe_access_key VARCHAR(64) DEFAULT ''"),
             ("zpl_printed_at", "ALTER TABLE real_orders ADD COLUMN zpl_printed_at DATETIME"),
+            ("picked_by", "ALTER TABLE real_orders ADD COLUMN picked_by VARCHAR(255) DEFAULT ''"),
+            ("picked_by_id", "ALTER TABLE real_orders ADD COLUMN picked_by_id INTEGER DEFAULT 0"),
+            ("picked_from_status_id", "ALTER TABLE real_orders ADD COLUMN picked_from_status_id INTEGER DEFAULT 0"),
+            ("picked_from_status_name", "ALTER TABLE real_orders ADD COLUMN picked_from_status_name VARCHAR(255) DEFAULT ''"),
+            ("picked_at", "ALTER TABLE real_orders ADD COLUMN picked_at DATETIME"),
+        ],
+    )
+
+
+def _ensure_bling_config_columns(sync_conn) -> None:
+    """Migração leve: credenciais de app Bling na mesma linha dos tokens."""
+    _ensure_columns(
+        sync_conn,
+        "bling_config",
+        [
+            ("client_id", "ALTER TABLE bling_config ADD COLUMN client_id TEXT DEFAULT ''"),
+            ("client_secret", "ALTER TABLE bling_config ADD COLUMN client_secret TEXT DEFAULT ''"),
         ],
     )

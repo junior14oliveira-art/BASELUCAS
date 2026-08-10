@@ -992,6 +992,25 @@ class MLFeedSyncService:
                 use_bl_statuses = False
 
             await session.execute(delete(RealOrderStatusDB))
+            # Preserva pickup local (Etapa 1) antes do replace — sync não pode apagar vínculo operador/fila
+            existing_order_rows = (
+                await session.execute(select(RealOrderDB))
+            ).scalars().all()
+            pickup_by_id: Dict[str, Dict[str, Any]] = {}
+            for er in existing_order_rows:
+                pb = (getattr(er, "picked_by", None) or "").strip()
+                if not pb:
+                    continue
+                pickup_by_id[str(er.id)] = {
+                    "picked_by": pb,
+                    "picked_by_id": int(getattr(er, "picked_by_id", 0) or 0),
+                    "picked_from_status_id": int(getattr(er, "picked_from_status_id", 0) or 0),
+                    "picked_from_status_name": getattr(er, "picked_from_status_name", "") or "",
+                    "picked_at": getattr(er, "picked_at", None),
+                    "status_id": int(er.status_id or 0),
+                    "status_name": er.status_name or "",
+                }
+
             await session.execute(delete(RealOrderDB))
             await session.execute(delete(RealProductDB))
 
@@ -1078,6 +1097,15 @@ class MLFeedSyncService:
         stats["feed_origem"] = feed.get("origem")
         stats["synced_at"] = datetime.now().isoformat(timespec="seconds")
         stats["cache"] = "sqlite"
+
+        # Macro Fiscal (Etapa 2): pedidos pagos → Bling (respeita BLING_READ_ONLY / NFE_EMIT_ENABLED)
+        try:
+            from src.infrastructure.bling_service import auto_push_paid_orders
+
+            stats["bling_auto_push"] = await auto_push_paid_orders(limit=25)
+        except Exception as exc:
+            stats["bling_auto_push"] = {"ok": False, "error": str(exc)}
+
         return stats
 
     async def get_last_sync_meta(self) -> Dict[str, Any]:

@@ -4,6 +4,7 @@ from sqlalchemy import select
 from src.infrastructure.database import async_session, RealOrderStatusDB, RealOrderDB
 from src.infrastructure.sync_service import sync_service
 from src.infrastructure.baselinker_status_import import import_baselinker_statuses_readonly
+from src.infrastructure.order_pickup import pickup_order, release_order, send_order_to_queue
 from src.agents.agents_orchestrator import orchestrator
 import json
 
@@ -93,6 +94,9 @@ async def list_orders(status: Optional[str] = Query(None), search: Optional[str]
                 "status_id": o.status_id,
                 "date": o.created_at.strftime("%d/%m/%Y %H:%M") if o.created_at else "",
                 "created_at": created_ts,
+                "picked_by": getattr(o, "picked_by", "") or "",
+                "picked_by_id": getattr(o, "picked_by_id", 0) or 0,
+                "picked_from_status_name": getattr(o, "picked_from_status_name", "") or "",
             })
 
         if search:
@@ -156,6 +160,41 @@ async def change_order_status(order_id: str, payload: Dict[str, Any]):
         "new_status": new_status_name,
         "baselinker_write": False,
     }
+
+
+@router.post("/{order_id}/pickup")
+async def pickup_order_endpoint(order_id: str, payload: Dict[str, Any]):
+    """Puxa pedido para a fila pessoal do operador logado (Fila · {nome})."""
+    operator_id = payload.get("operator_id")
+    if operator_id is None:
+        return {"ok": False, "status": "ERROR", "error": "operator_id é obrigatório."}
+    result = await pickup_order(str(order_id), int(operator_id))
+    result["status"] = "SUCCESS" if result.get("ok") else "ERROR"
+    return result
+
+
+@router.post("/{order_id}/send-to-queue")
+async def send_to_queue_endpoint(order_id: str, payload: Dict[str, Any]):
+    """Envia pedido da fila pessoal para destino padrão por role (ou target_queue)."""
+    operator_id = payload.get("operator_id")
+    if operator_id is None:
+        return {"ok": False, "status": "ERROR", "error": "operator_id é obrigatório."}
+    target = payload.get("target_queue") or payload.get("status_name")
+    result = await send_order_to_queue(str(order_id), int(operator_id), target)
+    result["status"] = "SUCCESS" if result.get("ok") else "ERROR"
+    return result
+
+
+@router.post("/{order_id}/release")
+async def release_order_endpoint(order_id: str, payload: Dict[str, Any]):
+    """Libera pedido da fila pessoal de volta à fila geral de origem."""
+    operator_id = payload.get("operator_id")
+    if operator_id is None:
+        return {"ok": False, "status": "ERROR", "error": "operator_id é obrigatório."}
+    result = await release_order(str(order_id), int(operator_id))
+    result["status"] = "SUCCESS" if result.get("ok") else "ERROR"
+    return result
+
 
 @router.post("/{order_id}/sync-reverse")
 async def sync_reverse_channel(order_id: str, payload: Dict[str, Any]):
@@ -245,10 +284,14 @@ async def update_order_details(order_id: str, payload: Dict[str, Any]):
         return {"status": "SUCCESS", "message": f"Dados do Pedido #{order_id} atualizados com sucesso!"}
 
 @router.post("/{order_id}/issue-nfe")
-async def issue_nfe_order(order_id: str):
-    """Emissão Fiscal Automática (SEFAZ) via FiscalAgent"""
-    fiscal_res = await orchestrator.run_fiscal_agent(order_id=order_id)
-    return {"status": "SUCCESS", "nfe_details": fiscal_res}
+async def issue_nfe_order(order_id: str, dry_run: bool = Query(False)):
+    """Macro Fiscal: push ML → Bling (pedido + NF-e gated). Alias de /bling/orders/{id}/push."""
+    from src.infrastructure.bling_service import push_order_to_bling
+
+    result = await push_order_to_bling(order_id, dry_run=dry_run, emit_nfe=True)
+    if not result.get("ok") and result.get("error") == "Pedido não encontrado no SQLite local.":
+        return {"status": "ERROR", "message": result["error"]}
+    return {"status": "SUCCESS" if result.get("ok") else "BLOCKED", "bling": result}
 
 @router.post("/{order_id}/generate-label")
 async def generate_shipping_label(order_id: str):

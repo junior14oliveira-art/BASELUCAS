@@ -1,11 +1,15 @@
-"""Router Bling ERP v3 — status, credenciais na UI e OAuth.
+"""Rotas Bling ERP API v3 — conexão UI + Macro Fiscal (Etapa 2).
 
-GET  /api/v1/bling/status
-POST /api/v1/bling/credentials   (Client ID + Secret do app)
-POST /api/v1/bling/tokens        (colar access/refresh manualmente)
-GET  /api/v1/bling/auth          (redirect OAuth)
-GET  /api/v1/bling/callback      (troca code → tokens)
-DELETE /api/v1/bling/connection  (limpa tokens; mantém client_id/secret opcional)
+  GET    /bling/status
+  POST   /bling/credentials      (Client ID + Secret via UI)
+  POST   /bling/tokens           (colar access/refresh manual)
+  DELETE /bling/connection
+  POST   /bling/test
+  GET    /bling/auth             → OAuth (JSON ou redirect)
+  GET    /bling/callback         → troca code → BlingConfigDB
+  POST   /bling/orders/{id}/push
+  POST   /bling/orders/auto-push-paid
+  POST   /bling/orders/{id}/issue-nfe
 """
 
 from __future__ import annotations
@@ -22,10 +26,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 
 from src.config import settings
+from src.infrastructure import bling_service
 from src.infrastructure.bling_client import (
     BlingAuthError,
     BlingClient,
     BlingError,
+    BlingNfeDisabledError,
+    BlingReadOnlyError,
     bling_read_only,
     build_authorize_url,
     exchange_code_for_tokens,
@@ -33,9 +40,11 @@ from src.infrastructure.bling_client import (
     nfe_emit_enabled,
     resolve_app_credentials,
 )
-from src.infrastructure.database import BlingConfigDB, async_session, init_db
+from src.infrastructure.database import BlingConfigDB, RealOrderDB, async_session, init_db
 
 router = APIRouter(prefix="/bling", tags=["Bling ERP"])
+
+_oauth_states: Dict[str, Dict[str, Any]] = {}
 
 
 class BlingCredentialsBody(BaseModel):
@@ -54,6 +63,22 @@ class BlingTokensBody(BaseModel):
 
 def _account_key(override: Optional[str] = None) -> str:
     return (override or settings.BLING_ACCOUNT_KEY or "4mc").strip() or "4mc"
+
+
+def _purge_states() -> None:
+    now = time.time()
+    for k, entry in list(_oauth_states.items()):
+        if float(entry.get("exp") or 0) < now:
+            _oauth_states.pop(k, None)
+
+
+def _mask(value: str, keep: int = 4) -> str:
+    v = (value or "").strip()
+    if not v:
+        return ""
+    if len(v) <= keep:
+        return "*" * len(v)
+    return ("*" * max(len(v) - keep, 4)) + v[-keep:]
 
 
 async def _get_or_create_row(session, account_key: str) -> BlingConfigDB:
@@ -82,16 +107,7 @@ async def load_bling_row(account_key: Optional[str] = None) -> Optional[BlingCon
         return result.scalar_one_or_none()
 
 
-def _mask(value: str, keep: int = 4) -> str:
-    v = (value or "").strip()
-    if not v:
-        return ""
-    if len(v) <= keep:
-        return "*" * len(v)
-    return ("*" * max(len(v) - keep, 4)) + v[-keep:]
-
-
-def _status_payload(row: Optional[BlingConfigDB]) -> Dict[str, Any]:
+def _status_payload(row: Optional[BlingConfigDB], *, all_rows: Optional[list] = None) -> Dict[str, Any]:
     client_id, client_secret = resolve_app_credentials(row)
     app_ok = bool(client_id and client_secret)
     has_token = bool(row and (row.access_token or "").strip())
@@ -101,7 +117,7 @@ def _status_payload(row: Optional[BlingConfigDB]) -> Dict[str, Any]:
 
     if has_token and not token_expired:
         ui_status = "configured"
-        ui_label = "Configurado (token ativo — NF-e aguardando homologação)"
+        ui_label = "Configurado (token ativo — NF-e aguarda homologação)"
         color = "amber"
     elif has_token and token_expired:
         ui_status = "awaiting_credentials"
@@ -116,13 +132,28 @@ def _status_payload(row: Optional[BlingConfigDB]) -> Dict[str, Any]:
         ui_label = "Não configurado — clique para informar Client ID / Secret"
         color = "muted"
 
-    # Nunca "connected" sem uso real de API fiscal — honestidade do hub
+    accounts = []
+    for r in all_rows or ([row] if row else []):
+        if not r:
+            continue
+        accounts.append(
+            {
+                "account_key": r.account_key,
+                "account_label": r.account_label,
+                "has_token": bool((r.access_token or "").strip()),
+                "token_expired": bool(r.expires_at and r.expires_at > 0 and time.time() >= r.expires_at),
+                "is_active": r.is_active,
+                "connected_at": r.connected_at.isoformat() if r.connected_at else None,
+            }
+        )
+
     return {
         "ok": True,
         "account_key": _account_key(row.account_key if row else None),
         "account_label": (row.account_label if row else "Bling ERP") or "Bling ERP",
         "app_configured": app_ok,
         "has_access_token": has_token,
+        "oauth_token_present": has_token and not token_expired,
         "token_expired": token_expired,
         "client_id_masked": _mask(client_id, 6),
         "has_client_secret": bool(client_secret),
@@ -135,15 +166,25 @@ def _status_payload(row: Optional[BlingConfigDB]) -> Dict[str, Any]:
         "ui_status": ui_status,
         "ui_label": ui_label,
         "ui_color": color,
-        "auth_url": f"{settings.API_V1_STR}/bling/auth",
+        "live_api": False,
+        "accounts": accounts,
+        "auth_url": f"{settings.API_V1_STR}/bling/auth?redirect=true",
+        "setup_hint": (
+            None if app_ok else "Informe Client ID/Secret no card Bling ou em apps/api/.env"
+        ),
     }
 
 
 @router.get("/status")
 async def bling_status(account_key: Optional[str] = None):
     """Status honesto para o card Bling na UI /app (sem expor secrets)."""
+    await init_db()
+    async with async_session() as session:
+        all_rows = list((await session.execute(select(BlingConfigDB))).scalars().all())
     row = await load_bling_row(account_key)
-    return _status_payload(row)
+    if not row and all_rows:
+        row = all_rows[0]
+    return _status_payload(row, all_rows=all_rows)
 
 
 @router.post("/credentials")
@@ -161,7 +202,6 @@ async def save_credentials(body: BlingCredentialsBody):
         row.last_error = ""
         await session.commit()
         await session.refresh(row)
-        # Espelha em settings para OAuth na mesma sessão do processo
         settings.BLING_CLIENT_ID = row.client_id
         settings.BLING_CLIENT_SECRET = row.client_secret
         return {
@@ -227,83 +267,6 @@ async def clear_connection(
         return {"ok": True, "message": "Conexão Bling limpa.", "status": _status_payload(row)}
 
 
-@router.get("/auth")
-async def bling_auth_start(account_key: Optional[str] = None):
-    """Inicia OAuth: redireciona para o Bling."""
-    row = await load_bling_row(account_key)
-    cid, csec = resolve_app_credentials(row)
-    if not (cid and csec):
-        raise HTTPException(
-            status_code=400,
-            detail="Informe Client ID e Client Secret no card Bling antes do OAuth.",
-        )
-    settings.BLING_CLIENT_ID = cid
-    settings.BLING_CLIENT_SECRET = csec
-    state = secrets.token_urlsafe(24)
-    # Guarda state + account em SyncMeta seria ideal; state curto no cookie via query no callback
-    # Usamos state = account_key|nonce
-    state_full = f"{_account_key(account_key)}.{state}"
-    try:
-        url = build_authorize_url(state=state_full)
-    except BlingAuthError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return RedirectResponse(url=url, status_code=302)
-
-
-@router.get("/callback")
-async def bling_oauth_callback(
-    code: Optional[str] = None,
-    state: Optional[str] = None,
-    error: Optional[str] = None,
-    error_description: Optional[str] = None,
-):
-    """Callback OAuth Bling → grava tokens e volta para /app."""
-    if error:
-        msg = quote(error_description or error)
-        return RedirectResponse(url=f"/app?bling_error={msg}", status_code=302)
-    if not code:
-        return RedirectResponse(url="/app?bling_error=missing_code", status_code=302)
-
-    account_key = _account_key()
-    if state and "." in state:
-        account_key = state.split(".", 1)[0] or account_key
-
-    row = await load_bling_row(account_key)
-    cid, csec = resolve_app_credentials(row)
-    if not (cid and csec):
-        return RedirectResponse(url="/app?bling_error=app_not_configured", status_code=302)
-    settings.BLING_CLIENT_ID = cid
-    settings.BLING_CLIENT_SECRET = csec
-
-    try:
-        tokens = await exchange_code_for_tokens(code)
-    except BlingAuthError as exc:
-        await init_db()
-        async with async_session() as session:
-            row2 = await _get_or_create_row(session, account_key)
-            row2.last_error = str(exc)
-            row2.updated_at = datetime.now()
-            await session.commit()
-        return RedirectResponse(url=f"/app?bling_error={quote(str(exc)[:180])}", status_code=302)
-
-    expires_in = float(tokens.get("expires_in") or 21600)
-    await init_db()
-    async with async_session() as session:
-        row3 = await _get_or_create_row(session, account_key)
-        row3.access_token = str(tokens.get("access_token") or "")
-        row3.refresh_token = str(tokens.get("refresh_token") or row3.refresh_token or "")
-        row3.expires_at = time.time() + expires_in
-        row3.scopes = str(tokens.get("scope") or tokens.get("scopes") or "")
-        row3.token_type = str(tokens.get("token_type") or "Bearer")
-        row3.is_active = True
-        row3.connected_at = datetime.now()
-        row3.updated_at = datetime.now()
-        row3.last_error = ""
-        await session.commit()
-
-    return RedirectResponse(url="/app?tab=marketplaces&bling=ok", status_code=302)
-
-
 @router.post("/test")
 async def test_bling_connection(account_key: Optional[str] = None):
     """GET /empresas/meus-dados — valida token sem marcar 'Conectado' fiscal."""
@@ -343,3 +306,145 @@ async def test_bling_connection(account_key: Optional[str] = None):
         "status": _status_payload(await load_bling_row(account_key)),
         "note": "Status UI permanece 'Configurado' até emissão NF-e homologada.",
     }
+
+
+@router.get("/auth")
+async def bling_auth_start(
+    redirect: bool = Query(True, description="Se true, redireciona ao Bling"),
+    account_key: Optional[str] = None,
+):
+    _purge_states()
+    row = await load_bling_row(account_key)
+    cid, csec = resolve_app_credentials(row)
+    if not (cid and csec):
+        raise HTTPException(
+            status_code=412,
+            detail={
+                "message": "Informe Client ID e Client Secret no card Bling antes do OAuth.",
+                "ui_status": "awaiting_credentials",
+            },
+        )
+    settings.BLING_CLIENT_ID = cid
+    settings.BLING_CLIENT_SECRET = csec
+    state = secrets.token_urlsafe(24)
+    _oauth_states[state] = {"exp": time.time() + 600, "account_key": _account_key(account_key)}
+    try:
+        url = build_authorize_url(state=state, row=row)
+    except BlingAuthError as exc:
+        raise HTTPException(status_code=412, detail=exc.message) from exc
+    if redirect:
+        return RedirectResponse(url)
+    return {"authorize_url": url, "state": state, "redirect_uri": settings.BLING_REDIRECT_URI}
+
+
+@router.get("/callback")
+async def bling_oauth_callback(
+    code: Optional[str] = None,
+    state: Optional[str] = None,
+    error: Optional[str] = None,
+    error_description: Optional[str] = None,
+):
+    if error:
+        msg = quote(error_description or error)
+        return RedirectResponse(url=f"/app?tab=marketplaces&bling_error={msg}", status_code=302)
+    if not code:
+        return RedirectResponse(url="/app?tab=marketplaces&bling_error=missing_code", status_code=302)
+
+    _purge_states()
+    entry = _oauth_states.pop(state, None) if state else None
+    account_key = _account_key((entry or {}).get("account_key") if entry else None)
+
+    row = await load_bling_row(account_key)
+    cid, csec = resolve_app_credentials(row)
+    if not (cid and csec):
+        return RedirectResponse(url="/app?tab=marketplaces&bling_error=app_not_configured", status_code=302)
+    settings.BLING_CLIENT_ID = cid
+    settings.BLING_CLIENT_SECRET = csec
+
+    try:
+        tokens = await exchange_code_for_tokens(code)
+    except BlingAuthError as exc:
+        return RedirectResponse(
+            url=f"/app?tab=marketplaces&bling_error={quote(str(exc)[:180])}",
+            status_code=302,
+        )
+
+    await bling_service.save_bling_tokens(tokens, account_key=account_key)
+    return RedirectResponse(url="/app?tab=marketplaces&bling=ok", status_code=302)
+
+
+@router.post("/orders/{order_id}/push")
+async def push_order(
+    order_id: str,
+    dry_run: bool = Query(False),
+    force: bool = Query(False),
+    emit_nfe: bool = Query(True),
+):
+    result = await bling_service.push_order_to_bling(
+        order_id, dry_run=dry_run, force=force, emit_nfe=emit_nfe
+    )
+    if not result.get("ok") and result.get("error") == "Pedido não encontrado no SQLite local.":
+        raise HTTPException(status_code=404, detail=result)
+    return result
+
+
+@router.post("/orders/auto-push-paid")
+async def auto_push_paid(limit: int = Query(25, ge=1, le=100)):
+    return await bling_service.auto_push_paid_orders(limit=limit)
+
+
+@router.post("/orders/{order_id}/issue-nfe")
+async def issue_nfe_only(order_id: str, dry_run: bool = Query(False)):
+    await init_db()
+    async with async_session() as session:
+        result = await session.execute(select(RealOrderDB).where(RealOrderDB.id == order_id))
+        order = result.scalar_one_or_none()
+        if not order:
+            raise HTTPException(status_code=404, detail="Pedido não encontrado.")
+        if not (order.bling_pedido_id or "").strip():
+            raise HTTPException(
+                status_code=409,
+                detail={"message": "Sem bling_pedido_id. Faça POST .../push antes."},
+            )
+        nfe_body = bling_service.build_nfe_payload(order, order.bling_pedido_id)
+
+    if dry_run:
+        return {"ok": True, "dry_run": True, "nfe_payload": nfe_body, "nfe_emit_enabled": nfe_emit_enabled()}
+
+    if not nfe_emit_enabled():
+        return {
+            "ok": False,
+            "blocked": True,
+            "reason": "nfe_emit_enabled=false",
+            "nfe_payload_preview": nfe_body,
+        }
+
+    if bling_read_only():
+        return {"ok": False, "blocked": True, "reason": "bling_read_only", "nfe_payload_preview": nfe_body}
+
+    client, _ = await bling_service.build_client()
+    if not client:
+        raise HTTPException(status_code=412, detail="Sem token OAuth Bling.")
+
+    try:
+        resp = await client.create_nfe(nfe_body, allow_write=True, allow_nfe=True)
+    except (BlingNfeDisabledError, BlingReadOnlyError) as exc:
+        return {"ok": False, "blocked": True, "error": exc.message, "nfe_payload_preview": nfe_body}
+    except BlingError as exc:
+        raise HTTPException(
+            status_code=exc.status_code or 502,
+            detail={"message": exc.message, "bling_payload": exc.payload},
+        ) from exc
+
+    data = resp.get("data") if isinstance(resp.get("data"), dict) else resp
+    nfe_id = str(data.get("id") or "") if isinstance(data, dict) else ""
+    async with async_session() as session:
+        result = await session.execute(select(RealOrderDB).where(RealOrderDB.id == order_id))
+        order = result.scalar_one_or_none()
+        if order:
+            order.bling_nfe_id = nfe_id
+            order.bling_status = "nfe_solicitada"
+            order.bling_last_error = ""
+            await session.commit()
+
+    return {"ok": True, "bling_nfe_id": nfe_id, "response": resp, "bling_status": "nfe_solicitada"}

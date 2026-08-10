@@ -8,10 +8,12 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Literal
 
-PluginStatus = Literal["connected", "not_configured", "coming_soon"]
+PluginStatus = Literal["connected", "configured", "awaiting_credentials", "not_configured", "coming_soon"]
 
 STATUS_LABELS = {
     "connected": "Conectado",
+    "configured": "Configurado",
+    "awaiting_credentials": "Aguardando credenciais",
     "not_configured": "Não configurado",
     "coming_soon": "Em breve",
 }
@@ -22,10 +24,30 @@ def build_integration_plugins(
     ml_feed_url: str,
     db_engine_label: str,
     ml_oauth_configured: bool,
+    bling_app_configured: bool = False,
+    bling_oauth_token: bool = False,
+    nfe_emit_enabled: bool = False,
 ) -> List[Dict[str, Any]]:
     """Lista de tiles para a UI /app → Integrações."""
     feed_detail = ml_feed_url or "FEED ML 4MC"
     oauth_status: PluginStatus = "connected" if ml_oauth_configured else "not_configured"
+
+    if not bling_app_configured:
+        bling_status: PluginStatus = "awaiting_credentials"
+        bling_detail = "BLING_CLIENT_ID / BLING_CLIENT_SECRET"
+    elif bling_oauth_token:
+        bling_status = "configured"
+        bling_detail = "OAuth ok — writes gated por BLING_READ_ONLY"
+    else:
+        bling_status = "configured"
+        bling_detail = "App ok — GET /api/v1/bling/auth"
+
+    nfe_status: PluginStatus = "configured" if bling_app_configured else "awaiting_credentials"
+    nfe_detail = (
+        "Emissão OFF (NFE_EMIT_ENABLED=false)"
+        if not nfe_emit_enabled
+        else "Emissão habilitada — homologação"
+    )
 
     plugins: List[Dict[str, Any]] = [
         {
@@ -63,20 +85,20 @@ def build_integration_plugins(
             "name": "Bling 4M&C",
             "category": "ERP / Bling",
             "icon": "account_balance",
-            "status": "coming_soon",
-            "detail": "Conta ERP",
+            "status": bling_status,
+            "detail": bling_detail,
             "live": False,
-            "description": "Adapter Bling planejado — sem API ao vivo.",
+            "description": "Macro Fiscal — POST /pedidos/vendas + NF-e gated. Nunca 'Conectado' sem OAuth.",
         },
         {
             "id": "bling_portal",
             "name": "Bling Portal",
             "category": "ERP / Bling",
             "icon": "account_balance",
-            "status": "not_configured",
+            "status": "coming_soon" if not bling_app_configured else bling_status,
             "detail": "Conta ERP",
             "live": False,
-            "description": "Adapter Bling planejado — sem API ao vivo.",
+            "description": "Adapter multi-conta — roadmap.",
         },
         {
             "id": "bling_max",
@@ -123,10 +145,10 @@ def build_integration_plugins(
             "name": "NF-e / SEFAZ",
             "category": "Fiscal",
             "icon": "receipt_long",
-            "status": "coming_soon",
-            "detail": "Emissão fiscal",
+            "status": nfe_status,
+            "detail": nfe_detail,
             "live": False,
-            "description": "Emissão NF-e / SEFAZ — adapter futuro (FiscalAgent).",
+            "description": "Emissão via Bling (POST /nfe) — NFE_EMIT_ENABLED=false até homologação.",
         },
         {
             "id": "base_printer",

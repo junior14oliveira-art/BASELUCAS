@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional, Tuple
 
 from sqlalchemy import select
 
-from src.domain.operator_roles import normalize_role
+from src.domain.operator_roles import ROLE_ADMIN, normalize_role
 from src.infrastructure.database import (
     OperatorDB,
     RealOrderDB,
@@ -15,7 +15,6 @@ from src.infrastructure.database import (
     async_session,
     init_db,
 )
-from src.domain.operator_roles import ROLE_ADMIN
 from src.infrastructure.native_queues import (
     PERSONAL_STATUS_ID_BASE,
     default_send_queue_name,
@@ -234,7 +233,7 @@ async def release_order(order_id: str, operator_id: int) -> Dict[str, Any]:
 
         picked_id = int(getattr(order, "picked_by_id", 0) or 0)
         role = normalize_role(operator.role)
-        if picked_id and picked_id != int(operator.id) and role != "Administrador":
+        if picked_id and picked_id != int(operator.id) and role != ROLE_ADMIN:
             return {
                 "ok": False,
                 "error": f"Pedido está com {order.picked_by}. Só quem pegou ou Admin pode liberar.",
