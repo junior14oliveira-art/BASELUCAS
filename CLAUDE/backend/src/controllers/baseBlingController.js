@@ -74,15 +74,47 @@ async function rateLimit() {
   _lastBlingCall = Date.now();
 }
 
-async function blingGet(path, token) {
+async function blingGet(path, token, params) {
   await rateLimit();
   return axios.get(`${BLING_API_BASE}${path}`, {
     headers: {
       Authorization: `Bearer ${token}`,
       Accept: "application/json",
     },
+    params: params || undefined,
     timeout: 30000,
   });
+}
+
+/**
+ * Normaliza um item de GET /pedidos/vendas (lista ou detalhe) para a UI.
+ * Não inventa campos — só extrai o que a API v3 costuma devolver.
+ */
+function mapPedidoVenda(raw) {
+  if (!raw || typeof raw !== "object") return null;
+  const contato = raw.contato || {};
+  const situacao = raw.situacao || {};
+  const situacaoLabel =
+    situacao.valor ||
+    situacao.nome ||
+    situacao.descricao ||
+    (situacao.id != null ? String(situacao.id) : "") ||
+    "";
+  return {
+    id: raw.id,
+    numero: raw.numero ?? raw.numeroPedido ?? null,
+    numero_loja: raw.numeroLoja ?? null,
+    data: raw.data || raw.dataSaida || null,
+    contato_nome: contato.nome || contato.name || "",
+    situacao: situacaoLabel,
+    situacao_id: situacao.id != null ? situacao.id : null,
+    total:
+      raw.total != null
+        ? Number(raw.total)
+        : raw.totalProdutos != null
+        ? Number(raw.totalProdutos)
+        : null,
+  };
 }
 
 async function blingPost(path, token, body) {
@@ -531,6 +563,130 @@ function montarPedidoVenda(pedido) {
   };
 }
 
+/**
+ * GET /api/v1/base/bling/orders — lista pedidos de venda no Bling (somente leitura).
+ * Proxy de GET https://api.bling.com.br/Api/v3/pedidos/vendas
+ * Query: pagina, limite, + filtros opcionais repassados (idsSituacoes, dataInicial, dataFinal…).
+ */
+async function listSalesOrders(req, res) {
+  try {
+    const key = accountKeyPadrao(req.query.account_key);
+    const token = await tokenValido(key);
+    if (!token) {
+      return res.status(412).json({
+        ok: false,
+        read_only: true,
+        bling_write: false,
+        error: "Sem access_token Bling — conclua OAuth ou cole tokens no card Bling.",
+        data: [],
+        total: 0,
+      });
+    }
+
+    const pagina = Math.max(1, Number(req.query.pagina || 1) || 1);
+    const limite = Math.max(1, Math.min(Number(req.query.limite || 50) || 50, 100));
+    const params = { pagina, limite };
+
+    // Filtros opcionais oficiais — só repassa se vierem na query (GET).
+    for (const campo of [
+      "idsSituacoes",
+      "dataInicial",
+      "dataFinal",
+      "numero",
+      "numeroLoja",
+      "idContato",
+    ]) {
+      if (req.query[campo] != null && String(req.query[campo]).trim() !== "") {
+        params[campo] = String(req.query[campo]).trim();
+      }
+    }
+
+    const { data } = await blingGet("/pedidos/vendas", token, params);
+    const listaRaw = Array.isArray(data?.data) ? data.data : Array.isArray(data) ? data : [];
+    const pedidos = listaRaw.map(mapPedidoVenda).filter(Boolean);
+
+    res.json({
+      ok: true,
+      read_only: true,
+      bling_write: false,
+      bling_read_only: somenteLeitura(),
+      pagina,
+      limite,
+      total: pedidos.length,
+      data: pedidos,
+      note: "SOMENTE LEITURA — GET /pedidos/vendas; nenhum dado alterado no Bling.",
+    });
+  } catch (err) {
+    const http = err.response?.status;
+    res.status(http === 401 ? 401 : http === 404 ? 404 : 502).json({
+      ok: false,
+      read_only: true,
+      bling_write: false,
+      error:
+        http === 401
+          ? "Token do Bling recusado (401). Refaça a autorização OAuth."
+          : `Falha ao listar pedidos de venda no Bling${http ? ` (HTTP ${http})` : ""}: ${err.message}`,
+      detail: err.response?.data,
+      data: [],
+      total: 0,
+    });
+  }
+}
+
+/**
+ * GET /api/v1/base/bling/orders/:blingOrderId — detalhe de um pedido de venda (somente leitura).
+ * Proxy de GET /pedidos/vendas/{idPedido}
+ */
+async function getSalesOrder(req, res) {
+  try {
+    const blingOrderId = String(req.params.blingOrderId || "").trim();
+    if (!blingOrderId || !/^\d+$/.test(blingOrderId)) {
+      return res.status(400).json({
+        ok: false,
+        error: "blingOrderId inválido (use o id numérico do pedido no Bling).",
+      });
+    }
+
+    const key = accountKeyPadrao(req.query.account_key);
+    const token = await tokenValido(key);
+    if (!token) {
+      return res.status(412).json({
+        ok: false,
+        read_only: true,
+        bling_write: false,
+        error: "Sem access_token Bling — conclua OAuth ou cole tokens no card Bling.",
+      });
+    }
+
+    const { data } = await blingGet(`/pedidos/vendas/${blingOrderId}`, token);
+    const raw = data?.data || data;
+    const pedido = mapPedidoVenda(raw);
+
+    res.json({
+      ok: true,
+      read_only: true,
+      bling_write: false,
+      bling_read_only: somenteLeitura(),
+      data: pedido,
+      note: "SOMENTE LEITURA — GET /pedidos/vendas/{id}; nenhum dado alterado no Bling.",
+    });
+  } catch (err) {
+    const http = err.response?.status;
+    res.status(http === 401 ? 401 : http === 404 ? 404 : 502).json({
+      ok: false,
+      read_only: true,
+      bling_write: false,
+      error:
+        http === 401
+          ? "Token do Bling recusado (401). Refaça a autorização OAuth."
+          : http === 404
+          ? "Pedido de venda não encontrado no Bling."
+          : `Falha ao buscar pedido no Bling${http ? ` (HTTP ${http})` : ""}: ${err.message}`,
+      detail: err.response?.data,
+    });
+  }
+}
+
 /** POST /api/v1/base/bling/orders/:orderId/push */
 async function pushOrder(req, res) {
   try {
@@ -618,6 +774,8 @@ module.exports = {
   clearConnection,
   authStart,
   authCallback,
+  listSalesOrders,
+  getSalesOrder,
   pushOrder,
   autoPushPaid,
   tokenValido,

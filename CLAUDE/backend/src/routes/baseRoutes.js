@@ -59,7 +59,7 @@ router.get("/expedition/scans", expedition.listScans);
 router.post("/expedition/scan", expedition.scanAndPrint);
 router.post("/expedition/arm/:orderId", expedition.armZpl);
 
-// ---------- Módulo 4: Bling ----------
+// ---------- Módulo 4: Bling (reads GET antes dos POSTs de write-gated) ----------
 router.get("/bling/status", bling.status);
 router.post("/bling/credentials", bling.saveCredentials);
 router.post("/bling/tokens", bling.saveTokens);
@@ -67,6 +67,9 @@ router.post("/bling/test", bling.testConnection);
 router.delete("/bling/connection", bling.clearConnection);
 router.get("/bling/auth", bling.authStart);
 router.get("/bling/callback", bling.authCallback);
+// SOMENTE LEITURA: lista / detalhe de pedidos de venda no Bling (API v3 GET)
+router.get("/bling/orders", bling.listSalesOrders);
+router.get("/bling/orders/:blingOrderId", bling.getSalesOrder);
 router.post("/bling/orders/auto-push-paid", bling.autoPushPaid);
 router.post("/bling/orders/:orderId/push", bling.pushOrder);
 
