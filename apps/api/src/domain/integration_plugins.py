@@ -31,6 +31,11 @@ def build_integration_plugins(
     """Lista de tiles para a UI /app → Integrações."""
     feed_detail = ml_feed_url or "FEED ML 4MC"
     oauth_status: PluginStatus = "connected" if ml_oauth_configured else "not_configured"
+    oauth_detail = (
+        "OAuth nativo conectado (não é o feed 4MC)"
+        if ml_oauth_configured
+        else "Sem ML_CLIENT_ID / ML_CLIENT_SECRET — card Canais → ML direto"
+    )
 
     if not bling_app_configured:
         bling_status: PluginStatus = "awaiting_credentials"
@@ -76,9 +81,9 @@ def build_integration_plugins(
             "category": "Marketplace",
             "icon": "login",
             "status": oauth_status,
-            "detail": "Credenciais ML_APP_ID / ML_SECRET_KEY" if ml_oauth_configured else "Sem ML_APP_ID / ML_SECRET_KEY",
+            "detail": oauth_detail,
             "live": False,
-            "description": "OAuth direto ML (não é o feed 4MC). Ainda sem wiring completo na UI.",
+            "description": "OAuth direto ML (não é o feed 4MC). Credenciais via card Canais ou .env.",
         },
         {
             "id": "bling_4mc",
