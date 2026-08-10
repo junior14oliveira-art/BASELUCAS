@@ -31,9 +31,6 @@ class Settings(BaseSettings):
     # BaseLinker — sempre via .env, nunca no código-fonte
     BASELINKER_API_TOKEN: str = ""
     BASELINKER_TOKEN: str = ""  # alias legado aceito no .env
-    # True (default): bloqueia writes BL mesmo com allow_write=True.
-    # Coordenar com ML_READ_ONLY (outro agente) — não reabrir writes sem aprovação.
-    BASELINKER_READ_ONLY: bool = True
 
     # Mercado Livre — credenciais do app criado no DevCenter
     # https://developers.mercadolivre.com.br/devcenter
@@ -49,10 +46,6 @@ class Settings(BaseSettings):
     ML_FEED_URL: str = "https://fourmc-market-api.onrender.com/api/base-antigravity/ml/feed"
     ML_FEED_ORDERS_URL: str = "https://fourmc-market-api.onrender.com/api/base-antigravity/ml/orders"
     ML_FEED_TOKEN_URL: str = "https://fourmc-market-api.onrender.com/api/base-antigravity/ml/token"
-
-    # Trava global: com True, clients/routers ML recusam POST/PUT/PATCH/DELETE
-    # que mutem anúncios, estoque, preço, perguntas, etc. Só liberar após homologação.
-    ML_READ_ONLY: bool = True
 
     # CORS Origins — aceita lista JSON ou valores separados por vírgula no .env.
     # NoDecode desliga o parser JSON do pydantic-settings para que o validator

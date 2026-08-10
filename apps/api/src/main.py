@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.config import settings
 from src.presentation.routers import (
     dashboard, orders, products, marketplaces, assistant, web_ui, automation_rules,
-    inventory_documents, shipments, crm, invoices, external_connect, mercadolivre
+    inventory_documents, shipments, crm, invoices, external_connect, mercadolivre, operators
 )
 
 app = FastAPI(
@@ -38,6 +38,7 @@ app.include_router(crm.router, prefix=settings.API_V1_STR)
 app.include_router(invoices.router, prefix=settings.API_V1_STR)
 app.include_router(external_connect.router, prefix=settings.API_V1_STR)
 app.include_router(mercadolivre.router, prefix=settings.API_V1_STR)
+app.include_router(operators.router, prefix=settings.API_V1_STR)
 
 @app.get("/api-status")
 async def api_status():

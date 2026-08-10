@@ -188,7 +188,7 @@ Nunca expor token no browser — só no backend (`mercadolivre_client.py` / brid
 | Recurso oficial | Método | 4MC | Notas |
 |---|---|---|---|
 | `/shipments/$ID` | GET | `/shipment/:id` | Preferir header **`x-format-new: true`** (estrutura nova) |
-| `/shipments/labels?shipment_ids=…` | GET | — (write/label futuro) | PDF/ZPL; **não alterar template** da etiqueta |
+| `/shipment_labels?shipment_ids=…` | GET | — (label; gated até OAuth + `ML_READ_ONLY=false`) | PDF/ZPL; **não alterar template**; ver `docs/LABELS_ML.md` |
 
 **Status de envio (`shipping.status`)** — principais:
 

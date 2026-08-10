@@ -1,6 +1,6 @@
 ---
 name: omnichannel-hub
-description: Visão e guia técnico do BASE ANTIGRAVITY (jrdev1 / 4M&C) — plataforma nativa estilo BaseLinker. Dados reais vêm do Mercado Livre via API read-only 4MC (feed/orders/order/shipment/item/questions/claims/messages/token) com cache SQLite local; BaseLinker é só molde de UI/UX (+ import read-only de status). Use esta skill para arquitetura, sync ML, roadmap Fases 1–4, estudo BL API e o que é real vs mock.
+description: Visão e guia técnico do BASE ANTIGRAVITY (jrdev1 / 4M&C) — plataforma nativa estilo BaseLinker. Dados reais vêm do Mercado Livre via API read-only 4MC com cache SQLite; BaseLinker é só molde/estudo de UI (não puxar status em produção). Filas = catálogo nativo + pickup local. Use para arquitetura, sync ML, roadmap e o que é real vs mock.
 allowed-tools:
   - "Read"
   - "Write"
@@ -8,6 +8,10 @@ allowed-tools:
 ---
 
 # Skill: BASE ANTIGRAVITY — Nosso BaseLinker (4M&C / jrdev1)
+
+> [!CAUTION]
+> **REGRA DE OURO (HARD RULE):** Os dados reais do sistema (pedidos, produtos, mensagens, etc.) vêm EXCLUSIVAMENTE do Mercado Livre via nosso banco de dados SQLite (`omnichannel_real.db`).
+> A API do BaseLinker (`api.baselinker.com`) e o token atual são **SOMENTE PARA ESTUDO E INSPIRAÇÃO VISUAL**. Nunca utilize o BaseLinker como fonte de dados para o pipeline de produção.
 
 Especificação viva do produto. Leia isto antes de alterar sync, UI de pedidos ou docs.
 
@@ -18,31 +22,43 @@ Especificação viva do produto. Leia isto antes de alterar sync, UI de pedidos 
 | O quê | Realidade |
 |---|---|
 | **Produto** | Plataforma **nativa** de gestão de pedidos/catálogo/expedição — **substituto do BaseLinker** para a 4M&C |
-| **BaseLinker** | **Molde** de UI/UX + capacidades (filas, PickPack, journals, couriers). **Não** é fonte de pedidos/produtos de produção |
+| **BaseLinker** | **Molde / estudo** de UI/UX (filas, PickPack, journals). **Não** fonte de pedidos nem de status em produção |
+| **Filas** | Catálogo **nativo** (`native_queues.py`) + filas pessoais de **pickup** (`order_pickup.py`) — SQLite only |
 | **Dados reais** | Mercado Livre via bridge **4MC Market API** (somente leitura) |
 | **Cache** | SQLite `omnichannel_real.db` — a UI lê o banco; rede só em sync explícito |
-| **Escrita no ML** | **Bloqueada** com `ML_READ_ONLY=true` (default) até homologação — estoque/preço/anúncios/perguntas |
-| **Escrita no BL** | **Bloqueada** com `BASELINKER_READ_ONLY=true` (default) + `allow_write=False` |
+| **Escrita no ML** | **Bloqueada** com `ML_READ_ONLY=true` (default) até homologação |
+| **API BL** | Só estudo — **não** `getOrderStatusList` / `getOrders` para filas operacionais |
 
 Estamos **criando o nosso BaseLinker**, não um cliente da API BaseLinker como OMS de produção.
 
-### BaseLinker como molde — leituras vs inspiração
+### Filas nativas + pickup (produção)
+
+Fluxo Oficial (Pipeline Paralelo):
+1. **Entrada:** A venda chega do Mercado Livre (via sync da API 4MC) e cai imediatamente na fila **Novos pedidos**.
+2. **Fiscal (Bling):** O pedido é enviado automaticamente (ou manualmente via botão) para o Bling para faturamento da Nota Fiscal (NF-e).
+3. **Operacional (Paralelo):** Sem esperar a nota, o pedido já pode ser movimentado para as filas dos técnicos ou de separação (ex: *Fila Técnico*, *Pacote*), permitindo que o trabalho físico comece.
+4. **Logística:** Quando o Bling retorna a NF-e autorizada, o sistema destrava e permite a impressão da **Etiqueta ZPL** do Mercado Envios.
+5. **Conclusão:** O fluxo local segue o Kanban (Técnico → Separação → Transporte) e o pacote é despachado.
+
+| Fila / ação | Detalhe |
+|---|---|
+| **Notebook - Geral** / **Computadores - Geral** | Entrada por título do item (`category_routing.py`) |
+| **Em Separação - Geral** | Destino padrão após técnico |
+| **Usuários** | CRUD `/api/v1/users` + aba Admin; seed nomes BL (`seed_hub_users.json`) roles `tecnico`/`separacao`/`admin` |
+| **Pegar** | `POST /orders/{id}/pickup` — filas pickable por role → `Fila · {nome}` |
+| **Enviar** | `POST /orders/{id}/send-to-queue` — destino padrão por role |
+| **Liberar** | volta à fila geral de origem (`picked_from_*`) |
+
+### BaseLinker como molde — só estudo
 
 Estudo: `docs/BASELINKER_API_STUDY.md` · API oficial: https://api.baselinker.com/
 
-| Uso | Métodos / conceitos BL | No nosso hub |
-|---|---|---|
-| **Read aprovado (hoje)** | `getOrderStatusList` | Import filas → `RealOrderStatusDB` (`baselinker_status_import.py`) |
-| **Read opcional aprovado** | `getOrders` | Mapa status → pedidos locais (`baselinker_status_map.py`) — **não** fonte do dashboard |
-| **Inspira UX local** | filtros/colunas de `getOrders`, status groups | Guia Pedidos `/app` (data, status, canal, busca) |
-| **Inspira Fase 2+** | `getJournalList` | Activity feed **local** (eventos SQLite), sem polling BL |
-| **Inspira Fase 3** | PickPack carts / `getOrderPickPackHistory` | Bipagem local (scanner USB) — **não iniciar** até liberar |
-| **Inspira Fase 4** | `getOrderPackages` / `getLabel` / printouts | ZPL Direct / Base.printer local |
-| **Inspira estoque** | Inventory Documents | Documentos de ajuste **locais** (pós Fase 2 estável) |
-| **Não portar writes** | `setOrder*`, `updateInventory*`, `createPackage`, macros `run*` | Domínio local ou futuro ERP/ML — nunca mass-write BL |
-| **Molde Next legado** | `apps/web` / `KIRO` clients (~120 métodos) | Referência UI — `docs/PIPELINE_PROMPTS_ROADMAP.md` |
-
-Client runtime: `apps/api/src/infrastructure/baselinker_client.py`.
+| Uso | No nosso hub |
+|---|---|
+| `getOrderStatusList` / mapa `getOrders` | **Desativado** na UI e nos endpoints operacionais |
+| Inspiração UX | Guia Pedidos, Kanban, pickup, PickPack, ZPL |
+| Writes BL | Nunca — `BASELINKER_READ_ONLY=true` |
+| Client | `baselinker_client.py` permanece para estudo/sandbox, não para filas de produção |
 
 ---
 
@@ -81,6 +97,8 @@ Env vars: `ML_FEED_URL`, `ML_FEED_ORDERS_URL`, `ML_FEED_TOKEN_URL`, `ML_FEED_BAS
 | POST sync / GET listagens | `apps/api/src/presentation/routers/orders.py` |
 | UI `/app` (botão “Atualizar feed Mercado Livre”) | `apps/api/src/presentation/routers/web_ui.py` |
 | Helpers UX/erros (toasts Nielsen) | `apps/api/src/presentation/static/app_ux.js` (servido em `/app/static/app_ux.js`) |
+| Design / Nielsen (sempre na UI) | `DESIGN.md` + regra `.cursor/rules/nielsen-base-lucas.mdc` |
+| Etiquetas ML / Declaração (skeleton) | `ml_shipping_labels.py` + `docs/LABELS_ML.md` — preview local OK; download ML gated (`ML_READ_ONLY` / OAuth) |
 
 Fluxo: **botão sync** → GET feed + `/ml/orders` (preferir orders se feed `paid=0`) → normaliza → grava SQLite → dashboard/pedidos leem **só** o DB.
 
@@ -100,12 +118,13 @@ Fluxo: **botão sync** → GET feed + `/ml/orders` (preferir orders se feed `pai
 
 Aba `/app` → **Integrações** = hub de tiles (estilo BaseLinker). Catálogo: `apps/api/src/domain/integration_plugins.py`.
 
-| Ao vivo hoje | Placeholders (Em breve / Não configurado) |
+| Ao vivo hoje | Pré-config / placeholders |
 |---|---|
-| Feed ML 4MC + SQLite cache | Bling (4M&C, Portal, Max, Star Lude, Brasil), ML OAuth direto, Mercado Envios, NF-e/SEFAZ, Base.printer |
+| Feed ML 4MC + SQLite cache | Bling (env + stub OAuth/GET) · NF-e via Bling (homologação, emissão off) · ML OAuth direto · Mercado Envios · Base.printer |
 
-- **Não** marcar Bling/NF como “Conectado” sem API real.
+- **Não** marcar Bling/NF como “Conectado” sem API real — usar **Configurado** / **Aguardando credenciais**.
 - Stub clique → toast de roadmap; wiring futuro = adapters por plugin, sem mudar o molde do grid.
+- Estudo: `docs/BLING_API_STUDY.md` · client `bling_client.py` · router `/api/v1/bling/*` · `BLING_READ_ONLY=true` / `NFE_EMIT_ENABLED=false`.
 - Detalhe: `docs/ARCHITECTURE.md` § Plugin architecture.
 
 ---
@@ -117,11 +136,11 @@ Aba `/app` → **Integrações** = hub de tiles (estilo BaseLinker). Catálogo: 
 | **1** | APIs e Infra (FastAPI + Next.js + API ML 4MC) | 🟢 Concluído |
 | **2** | Conexão do feed → SQLite → Guia Pedidos / Lista | 🟡 Em andamento (sync + lista local; vazio se upstream 0) |
 | **3** | Bipagem Pick & Pack (scanner USB) | 🔴 Pendente — **não iniciar** |
-| **4** | Impressão ZPL Direct (Zebra/Elgin) | 🔴 Pendente — **não iniciar** |
+| **4** | Impressão ZPL Direct (Zebra/Elgin) | 🔴 Pendente — skeleton etiquetas em `docs/LABELS_ML.md` (preview local; ML gated) |
 
 **UI `/app` (molde BaseLinker):** Guia Pedidos, Guia Produtos, Financeiro detalhado (relatório só de `RealOrderDB` / cache ML — sem Bling/SEFAZ inventado).
 
-Docs: `docs/ROADMAP.md`, `docs/ARCHITECTURE.md`, `docs/DATA_SOURCE_ML_FEED.md`, `docs/MERCADOLIVRE_API_STUDY.md`.
+Docs: `docs/ROADMAP.md`, `docs/ARCHITECTURE.md`, `docs/DATA_SOURCE_ML_FEED.md`, `docs/MERCADOLIVRE_API_STUDY.md`, `docs/LABELS_ML.md`.
 
 ---
 
@@ -135,7 +154,7 @@ Tabela útil para o desenho futuro. **Hoje a maioria é stub/orquestração mock
 | `StockAgent` | Estoque multi-depósito / kits | Mock / planejado — **sem escrita no ML** |
 | `ERPAgent` | Bling / ERP | Mock / roadmap longo |
 | `FiscalAgent` | NF-e / SEFAZ | Mock / roadmap longo |
-| `ShippingAgent` | Frete + etiquetas | Roadmap (Sprint 4 = ZPL) |
+| `ShippingAgent` | Frete + etiquetas | Skeleton: `ml_shipping_labels.py` + preview; ZPL Direct = Sprint 4 |
 | `NotificationAgent` | WhatsApp / pós-venda | Mock |
 | `FinancialAgent` | Margem / DRE | Mock |
 | `ReportAgent` | BI / previsão | Mock |
@@ -149,7 +168,7 @@ Orquestrador de referência: `apps/api/src/agents/` (não confundir com sync ML)
 
 1. **Não** reintroduzir BaseLinker como fonte de pedidos/dashboard sem pedido explícito do usuário.
 2. **Não** escrever estoque/preço/perguntas no Mercado Livre — `ML_READ_ONLY=true` até homologação explícita.
-3. **Não** escrever no BaseLinker — `BASELINKER_READ_ONLY=true` + só `getOrderStatusList` / opcional `getOrders` (mapa local). Ver `docs/BASELINKER_API_STUDY.md`.
+3. **Não** usar API BaseLinker para filas/status em produção — filas nativas + pickup local. BL = estudo (`docs/BASELINKER_API_STUDY.md`).
 4. Leituras de UI → SQLite; rede → só `sync-now` / jobs explícitos (GET whitelist 4MC).
 5. Distinguir sempre: **molde UX** vs **dado real** vs **mock de agente**.
 6. Preferir `/ml/orders` quando o feed vier com `total_orders_paid: 0` ou `orders: []`.

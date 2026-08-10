@@ -1,13 +1,8 @@
-"""Cliente HTTP read-only do feed Mercado Livre (bridge Base Antigravity / 4MC).
-
-Somente GET na whitelist. Com ML_READ_ONLY=True (default), qualquer tentativa
-de escrita é recusada. UI deve ler SQLite; rede só em sync explícito.
-"""
+"""Cliente HTTP read-only do feed Mercado Livre (bridge Base Antigravity)."""
 
 from __future__ import annotations
 
 import asyncio
-import re
 from typing import Any, Dict, Optional
 from urllib.parse import urljoin
 
@@ -17,33 +12,10 @@ from src.config import settings
 
 # Bridge 4MC / ML: orders rejeita limit > 51 (400 limit.maximum_exceeded).
 ORDERS_MAX_LIMIT = 50
-# Cap geral de paginação (docs pedem ≤100; /items costuma estourar com 50).
-ITEMS_MAX_LIMIT = 100
-ITEMS_SAFE_LIMIT = 20
-
-# Paths GET permitidos sob ML_FEED_BASE_URL (relativos).
-_ALLOWED_GET_PATTERNS = (
-    re.compile(r"^feed$"),
-    re.compile(r"^orders$"),
-    re.compile(r"^order/[^/]+$"),
-    re.compile(r"^shipment/[^/]+$"),
-    re.compile(r"^item/[^/]+$"),
-    re.compile(r"^items$"),
-    re.compile(r"^questions$"),
-    re.compile(r"^claims$"),
-    re.compile(r"^messages/[^/]+$"),
-    re.compile(r"^token$"),
-)
-
-WRITE_HTTP_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 
 class MLFeedClientError(RuntimeError):
     pass
-
-
-class MLFeedReadOnlyError(MLFeedClientError):
-    """Escrita bloqueada — bridge 4MC / ML em modo somente leitura."""
 
 
 class MLFeedClient:
@@ -54,29 +26,6 @@ class MLFeedClient:
 
     def _url(self, path: str) -> str:
         return urljoin(self.base_url, path.lstrip("/"))
-
-    @staticmethod
-    def _normalize_path(path: str) -> str:
-        return path.strip().lstrip("/")
-
-    def _assert_path_allowed(self, path: str) -> None:
-        norm = self._normalize_path(path)
-        if not any(p.match(norm) for p in _ALLOWED_GET_PATTERNS):
-            raise MLFeedClientError(
-                f"Path 4MC fora da whitelist GET: '{norm}'. "
-                "Permitidos: feed, orders, order/:id, shipment/:id, item/:id, "
-                "items, questions, claims, messages/:orderId, token."
-            )
-
-    def _assert_read_only(self, method: str, path: str = "") -> None:
-        method_u = (method or "GET").upper()
-        if method_u in WRITE_HTTP_METHODS or (
-            method_u != "GET" and settings.ML_READ_ONLY
-        ):
-            raise MLFeedReadOnlyError(
-                "ML_READ_ONLY: bridge 4MC / Mercado Livre é somente leitura "
-                f"(em construção). Recusado: {method_u} {path or '(feed)'}."
-            )
 
     async def _sleep_backoff(self, attempt: int, retry_after: Optional[str] = None) -> None:
         if retry_after:
@@ -89,8 +38,6 @@ class MLFeedClient:
         await asyncio.sleep(wait)
 
     async def _get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        self._assert_read_only("GET", path)
-        self._assert_path_allowed(path)
         url = self._url(path)
         last_exc: Optional[Exception] = None
         for attempt in range(5):
@@ -122,30 +69,8 @@ class MLFeedClient:
             return data
         raise MLFeedClientError(f"Falha ao consultar feed ML ({url}): {last_exc}")
 
-    async def request(
-        self,
-        method: str,
-        path: str,
-        *,
-        allow_write: bool = False,
-        params: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        """Entrada genérica — writes sempre recusados com ML_READ_ONLY / allow_write=False."""
-        method_u = (method or "GET").upper()
-        if method_u != "GET":
-            if settings.ML_READ_ONLY or not allow_write:
-                raise MLFeedReadOnlyError(
-                    "ML_READ_ONLY: escrita no bridge 4MC bloqueada. "
-                    f"Recusado: {method_u} {path}."
-                )
-            raise MLFeedClientError(
-                f"Cliente feed não implementa escrita ({method_u} {path})."
-            )
-        return await self._get(path, params=params)
-
     async def get_feed(self) -> Dict[str, Any]:
         """Resumo + amostras (orders/questions/item_ids)."""
-        self._assert_read_only("GET", "feed")
         if settings.ML_FEED_URL:
             try:
                 async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -166,7 +91,6 @@ class MLFeedClient:
         """Lista paginada de pedidos (todos os status). Bridge 4MC: limit máx. 50."""
         limit = max(1, min(int(limit or ORDERS_MAX_LIMIT), ORDERS_MAX_LIMIT))
         offset = max(0, int(offset or 0))
-        self._assert_read_only("GET", "orders")
         if settings.ML_FEED_ORDERS_URL:
             try:
                 async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -211,12 +135,10 @@ class MLFeedClient:
     async def get_items(
         self,
         offset: int = 0,
-        limit: int = ITEMS_SAFE_LIMIT,
+        limit: int = 50,
         status: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Lista anúncios do bridge. status: active|paused|closed|… (omitir = default do bridge)."""
-        limit = max(1, min(int(limit or ITEMS_SAFE_LIMIT), ITEMS_MAX_LIMIT))
-        offset = max(0, int(offset or 0))
         params: Dict[str, Any] = {"offset": offset, "limit": limit}
         if status:
             params["status"] = status
@@ -233,7 +155,6 @@ class MLFeedClient:
 
     async def ping_token_endpoint(self) -> Dict[str, Any]:
         """Consulta metadados do endpoint /token (sem persistir o access_token)."""
-        self._assert_read_only("GET", "token")
         url = settings.ML_FEED_TOKEN_URL or self._url("token")
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
@@ -256,21 +177,6 @@ class MLFeedClient:
             "token_type": data.get("token_type"),
             "has_access_token": bool(data.get("access_token")),
         }
-
-
-# Whitelist documentada (paths relativos à base 4MC).
-ALLOWED_4MC_GET_ENDPOINTS = (
-    "GET /feed",
-    "GET /orders?offset=&limit= (max 50)",
-    "GET /order/:orderId",
-    "GET /shipment/:shipmentId",
-    "GET /item/:itemId",
-    "GET /items?offset=&limit=&status= (limit max 100; prefer 20)",
-    "GET /questions",
-    "GET /claims",
-    "GET /messages/:orderId",
-    "GET /token (metadados; strip access_token)",
-)
 
 
 ml_feed_client = MLFeedClient()

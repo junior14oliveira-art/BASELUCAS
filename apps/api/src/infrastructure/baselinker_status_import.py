@@ -111,16 +111,6 @@ async def import_baselinker_statuses_readonly() -> Dict[str, Any]:
         }
 
     statuses = _extract_statuses(raw)
-    # Dedup por nome (ex.: "Computadores - Geral" duplicado) — mantém menor id
-    deduped: List[Dict[str, Any]] = []
-    seen_names: Dict[str, int] = {}
-    for s in sorted(statuses, key=lambda x: x["id"]):
-        key = s["name"].strip().lower()
-        if key in seen_names:
-            continue
-        seen_names[key] = s["id"]
-        deduped.append(s)
-    statuses = deduped
     if not statuses:
         return {
             "ok": False,
@@ -152,11 +142,8 @@ async def import_baselinker_statuses_readonly() -> Dict[str, Any]:
                 )
             )
 
-        # Pedidos ainda com buckets ML (ids 1–7 / nomes canônicos) → "Novos pedidos" se existir
-        default = next(
-            (s for s in statuses if "novo" in s["name"].lower()),
-            statuses[0],
-        )
+        # Pedidos ainda com buckets ML (ids 1–7 / nomes canônicos) → 1º status BL
+        default = statuses[0]
         ml_bucket_names = {
             "Pagos",
             "Confirmados",

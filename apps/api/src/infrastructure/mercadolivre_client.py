@@ -21,9 +21,6 @@ from src.config import settings
 
 ML_API_URL = "https://api.mercadolibre.com"
 
-# Métodos HTTP que mutam recursos no Mercado Livre.
-WRITE_HTTP_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
-
 # O domínio de autorização muda por país. MLB = Brasil.
 ML_AUTH_DOMAINS = {
     "MLB": "https://auth.mercadolivre.com.br",
@@ -51,15 +48,7 @@ class MercadoLivreAuthError(MercadoLivreError):
 
 
 class MercadoLivreReadOnlyError(MercadoLivreError):
-    """Escrita bloqueada por ML_READ_ONLY / allow_write=False (fase de construção)."""
-
-    def __init__(self, method: str, path: str):
-        super().__init__(
-            "ML_READ_ONLY: escrita no Mercado Livre bloqueada (somente leitura — em construção). "
-            f"Recusado: {method.upper()} {path}. "
-            "Defina ML_READ_ONLY=false e allow_write=True só após homologação explícita.",
-            status_code=403,
-        )
+    """Operação bloqueada porque a integração está em modo somente leitura."""
 
 
 class _RateLimiter:
@@ -232,19 +221,8 @@ class MercadoLivreClient:
         authed: bool = True,
         max_retries: int = 3,
         raw: bool = False,
-        *,
-        allow_write: bool = False,
     ) -> Any:
-        """Executa a chamada HTTP com refresh automático, retry e backoff.
-
-        Escritas (POST/PUT/PATCH/DELETE) só passam com ``allow_write=True`` **e**
-        ``ML_READ_ONLY=false``. OAuth ``/oauth/token`` usa ``_token_request`` e
-        não passa por aqui.
-        """
-        method_u = (method or "GET").upper()
-        if method_u in WRITE_HTTP_METHODS and (settings.ML_READ_ONLY or not allow_write):
-            raise MercadoLivreReadOnlyError(method_u, path)
-
+        """Executa a chamada HTTP com refresh automático, retry e backoff."""
         if authed and self.is_token_expired():
             async with self._refresh_lock:
                 if self.is_token_expired():
@@ -262,7 +240,7 @@ class MercadoLivreClient:
             async with _rate_limiter:
                 async with httpx.AsyncClient(timeout=45.0) as client:
                     resp = await client.request(
-                        method_u, url, params=params, json=json_body, headers=headers
+                        method, url, params=params, json=json_body, headers=headers
                     )
 
             # 401: tenta um refresh e repete uma única vez.
@@ -402,51 +380,36 @@ class MercadoLivreClient:
                 results.extend(payload)
         return results
 
-    async def create_item(self, item_data: Dict[str, Any], *, allow_write: bool = False) -> Dict[str, Any]:
-        """Publica um novo anúncio (bloqueado com ML_READ_ONLY / allow_write=False)."""
-        return await self._request("POST", "/items", json_body=item_data, allow_write=allow_write)
+    async def create_item(self, item_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Publica um novo anúncio."""
+        return await self._request("POST", "/items", json_body=item_data)
 
-    async def update_item(
-        self, item_id: str, fields: Dict[str, Any], *, allow_write: bool = False
-    ) -> Dict[str, Any]:
-        """Atualiza campos do anúncio (bloqueado com ML_READ_ONLY / allow_write=False)."""
-        return await self._request(
-            "PUT", f"/items/{item_id}", json_body=fields, allow_write=allow_write
-        )
+    async def update_item(self, item_id: str, fields: Dict[str, Any]) -> Dict[str, Any]:
+        """Atualiza campos do anúncio (price, available_quantity, status, pictures...)."""
+        return await self._request("PUT", f"/items/{item_id}", json_body=fields)
 
-    async def update_item_price(
-        self, item_id: str, price: float, *, allow_write: bool = False
-    ) -> Dict[str, Any]:
-        return await self.update_item(item_id, {"price": price}, allow_write=allow_write)
+    async def update_item_price(self, item_id: str, price: float) -> Dict[str, Any]:
+        return await self.update_item(item_id, {"price": price})
 
-    async def update_item_stock(
-        self, item_id: str, quantity: int, *, allow_write: bool = False
-    ) -> Dict[str, Any]:
-        return await self.update_item(
-            item_id, {"available_quantity": quantity}, allow_write=allow_write
-        )
+    async def update_item_stock(self, item_id: str, quantity: int) -> Dict[str, Any]:
+        return await self.update_item(item_id, {"available_quantity": quantity})
 
-    async def pause_item(self, item_id: str, *, allow_write: bool = False) -> Dict[str, Any]:
-        return await self.update_item(item_id, {"status": "paused"}, allow_write=allow_write)
+    async def pause_item(self, item_id: str) -> Dict[str, Any]:
+        return await self.update_item(item_id, {"status": "paused"})
 
-    async def activate_item(self, item_id: str, *, allow_write: bool = False) -> Dict[str, Any]:
-        return await self.update_item(item_id, {"status": "active"}, allow_write=allow_write)
+    async def activate_item(self, item_id: str) -> Dict[str, Any]:
+        return await self.update_item(item_id, {"status": "active"})
 
-    async def close_item(self, item_id: str, *, allow_write: bool = False) -> Dict[str, Any]:
+    async def close_item(self, item_id: str) -> Dict[str, Any]:
         """Finaliza o anúncio. Estado terminal — não é possível reativar."""
-        return await self.update_item(item_id, {"status": "closed"}, allow_write=allow_write)
+        return await self.update_item(item_id, {"status": "closed"})
 
     async def get_item_description(self, item_id: str) -> Dict[str, Any]:
         return await self._request("GET", f"/items/{item_id}/description")
 
-    async def update_item_description(
-        self, item_id: str, plain_text: str, *, allow_write: bool = False
-    ) -> Dict[str, Any]:
+    async def update_item_description(self, item_id: str, plain_text: str) -> Dict[str, Any]:
         return await self._request(
-            "PUT",
-            f"/items/{item_id}/description",
-            json_body={"plain_text": plain_text},
-            allow_write=allow_write,
+            "PUT", f"/items/{item_id}/description", json_body={"plain_text": plain_text}
         )
 
     # ------------------------------------------------------------------
@@ -518,14 +481,9 @@ class MercadoLivreClient:
             "offset": offset,
         })
 
-    async def answer_question(
-        self, question_id: int, text: str, *, allow_write: bool = False
-    ) -> Dict[str, Any]:
+    async def answer_question(self, question_id: int, text: str) -> Dict[str, Any]:
         return await self._request(
-            "POST",
-            "/answers",
-            json_body={"question_id": question_id, "text": text},
-            allow_write=allow_write,
+            "POST", "/answers", json_body={"question_id": question_id, "text": text}
         )
 
     # ------------------------------------------------------------------

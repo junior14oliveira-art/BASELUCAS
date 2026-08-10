@@ -33,7 +33,7 @@ from src.infrastructure.ml_feed_client import (
 
 # Paginação completa (~8k pedidos): 50/página. Enrich detalhe/shipment só no lote recente.
 ENRICH_ORDERS_LIMIT = 40
-ENRICH_ITEMS_LIMIT = 25
+ENRICH_ITEMS_LIMIT = 200
 ENRICH_DELAY_SEC = 0.35
 ORDERS_MAX_OFFSET = 20_000
 
@@ -986,27 +986,6 @@ class MLFeedSyncService:
             if use_bl_statuses and not preserved_bl:
                 use_bl_statuses = False
 
-            # Snapshot do mapa BL→pedido ANTES do wipe — sync ML não pode
-            # jogar tudo de volta em "Novos pedidos" e zerar as filas.
-            prev_status_by_key: Dict[str, tuple] = {}
-            if use_bl_statuses:
-                existing_order_rows = (
-                    await session.execute(select(RealOrderDB))
-                ).scalars().all()
-                for eo in existing_order_rows:
-                    sid = int(eo.status_id or 0)
-                    sname = (eo.status_name or "").strip()
-                    if not sname and not sid:
-                        continue
-                    payload = (sid, sname)
-                    for k in (eo.id, eo.external_id):
-                        if k is None or str(k).strip() == "":
-                            continue
-                        sk = str(k).strip()
-                        prev_status_by_key[sk] = payload
-                        if sk.upper().startswith("ML-"):
-                            prev_status_by_key[sk[3:]] = payload
-
             await session.execute(delete(RealOrderStatusDB))
             await session.execute(delete(RealOrderDB))
             await session.execute(delete(RealProductDB))
@@ -1014,8 +993,6 @@ class MLFeedSyncService:
             if use_bl_statuses:
                 default = preserved_bl[0]
                 by_name = {s["name"].lower(): s for s in preserved_bl}
-                bl_ids = {int(s["id"]) for s in preserved_bl}
-                bl_names = {s["name"] for s in preserved_bl}
                 # Preferência: nome BL contendo "novo" / "pago" / match exato ML
                 preferred = None
                 for s in preserved_bl:
@@ -1029,35 +1006,12 @@ class MLFeedSyncService:
                             preferred = s
                             break
                 default = preferred or default
-                restored = 0
                 for o in normalized_orders:
-                    # 1) Restaura fila BL já mapeada (mesmo id/external_id)
-                    restored_ok = False
-                    for k in (o.get("id"), o.get("external_id")):
-                        if k is None or str(k).strip() == "":
-                            continue
-                        sk = str(k).strip()
-                        prev = prev_status_by_key.get(sk)
-                        if not prev and sk.upper().startswith("ML-"):
-                            prev = prev_status_by_key.get(sk[3:])
-                        if not prev:
-                            continue
-                        psid, psname = prev
-                        if psid in bl_ids and psname in bl_names:
-                            o["status_id"] = psid
-                            o["status_name"] = psname
-                            restored += 1
-                            restored_ok = True
-                            break
-                    if restored_ok:
-                        continue
-                    # 2) Match por nome ML == nome de fila BL
                     match = by_name.get((o.get("status_name") or "").lower())
                     if match:
                         o["status_id"] = match["id"]
                         o["status_name"] = match["name"]
                     else:
-                        # 3) Pedido só-ML / sem mapa → fila default (Novos)
                         o["status_id"] = default["id"]
                         o["status_name"] = default["name"]
                 for s in preserved_bl:
@@ -1073,7 +1027,6 @@ class MLFeedSyncService:
                     )
                 stats["statuses_synced"] = len(preserved_bl)
                 stats["statuses_source"] = "baselinker_preserved"
-                stats["bl_status_restored"] = restored
             else:
                 for sid, name, color in STATUS_CATALOG:
                     count = sum(1 for o in normalized_orders if o["status_name"] == name)

@@ -199,6 +199,17 @@ async def init_db():
         await conn.run_sync(_ensure_real_orders_columns)
 
 
+class OperatorDB(Base):
+    """Tabela de Operadores / Técnicos / Usuários do sistema (CRUD local)."""
+    __tablename__ = "operators"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(255), index=True)
+    role: Mapped[str] = mapped_column(String(100), default="Técnico")
+    email: Mapped[str] = mapped_column(String(255), default="")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+
 def _ensure_columns(sync_conn, table: str, alters: list) -> None:
     try:
         rows = sync_conn.exec_driver_sql(f"PRAGMA table_info({table})").fetchall()

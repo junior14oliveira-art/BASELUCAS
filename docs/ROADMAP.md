@@ -4,7 +4,7 @@
 **Molde:** UI/UX inspirada no BaseLinker.  
 **Dados:** Mercado Livre via API 4MC read-only + SQLite local (`omnichannel_real.db`).
 
-Skill: `.agents/skills/omnichannel-hub/SKILL.md` · Dados: `docs/DATA_SOURCE_ML_FEED.md` · API oficial ML: `docs/MERCADOLIVRE_API_STUDY.md` · Arquitetura: `docs/ARCHITECTURE.md` · Estudo BL (molde): `docs/BASELINKER_API_STUDY.md`
+Skill: `.agents/skills/omnichannel-hub/SKILL.md` · Dados: `docs/DATA_SOURCE_ML_FEED.md` · API oficial ML: `docs/MERCADOLIVRE_API_STUDY.md` · Arquitetura: `docs/ARCHITECTURE.md` · Estudo BL (molde): `docs/BASELINKER_API_STUDY.md` · Bling/NF-e: `docs/BLING_API_STUDY.md` · Etiquetas: `docs/LABELS_ML.md`
 
 ---
 
@@ -15,7 +15,13 @@ Skill: `.agents/skills/omnichannel-hub/SKILL.md` · Dados: `docs/DATA_SOURCE_ML_
 | **1 — APIs e Infra** | FastAPI + Next.js (KIRO) + bridge API ML 4MC | 🟢 **CONCLUÍDO** |
 | **2 — Conexão do Feed** | Sync `/ml/feed` + `/ml/orders` → SQLite → **Guia Pedidos → Lista de pedidos** em `/app` | 🟡 **QUASE FEITO** — lista + sync na UI; vazio honesto se upstream 0; falta só pedidos reais no bridge para “encher” a lista |
 | **3 — Bipagem Pick & Pack** | Scanner USB no galpão | 🔴 **PENDENTE** — não iniciar agora |
-| **4 — Impressão ZPL Direct** | Envio direto Zebra/Elgin | 🔴 **PENDENTE** — não iniciar agora |
+| **4 — Impressão ZPL Direct** | Envio direto Zebra/Elgin | 🔴 **PENDENTE** — skeleton de etiquetas/preview já em `docs/LABELS_ML.md` (download ML ainda gated) |
+
+### Etiquetas / Declaração de Conteúdo (prep Fase 4)
+
+- **Hoje:** preview HTML local + gate 501/403 — `GET /api/v1/orders/{{id}}/label` e `/label/preview`
+- **Produção:** OAuth + `ML_READ_ONLY=false` + `GET /shipment_labels?response_type=pdf|zpl2`
+- Detalhe: **`docs/LABELS_ML.md`**
 
 ```mermaid
 timeline
@@ -48,6 +54,9 @@ timeline
 
 Fases aspiracionais depois da 4: multi-canal, fiscal (Bling/SEFAZ), WhatsApp/CRM, financeiro ERP, AssistantAgent com LLM.  
 **Não** marcar como concluídas.
+
+**Bling / NF-e (pré-config 08/2026):** env + client stub + router `/api/v1/bling/*` + tiles honestos em Integrações.  
+Emissão real e sync ERP = só após homologação (`BLING_READ_ONLY=false` + `NFE_EMIT_ENABLED=true`). Detalhe: `docs/BLING_API_STUDY.md`.
 
 Detalhe de paridade de molde UI: `docs/PIPELINE_PROMPTS_ROADMAP.md` — útil para UX, **não** redefine a fonte de dados.
 

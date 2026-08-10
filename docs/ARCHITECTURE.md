@@ -3,7 +3,7 @@
 Plataforma **nativa** estilo BaseLinker para a 4M&C.  
 **BaseLinker = molde de UI/UX.** **Dados de produção = Mercado Livre via API 4MC (read-only) + cache SQLite.**
 
-Documentos irmãos: `docs/DATA_SOURCE_ML_FEED.md` (feed 4MC) · `docs/MERCADOLIVRE_API_STUDY.md` (API oficial ML) · `docs/BASELINKER_API_STUDY.md` (molde UI) · Roadmap: `docs/ROADMAP.md` · Skill: `.agents/skills/omnichannel-hub/SKILL.md`
+Documentos irmãos: `docs/DATA_SOURCE_ML_FEED.md` (feed 4MC) · `docs/MERCADOLIVRE_API_STUDY.md` (API oficial ML) · `docs/BASELINKER_API_STUDY.md` (molde UI) · `docs/LABELS_ML.md` (etiquetas) · Roadmap: `docs/ROADMAP.md` · Skill: `.agents/skills/omnichannel-hub/SKILL.md`
 
 ---
 
@@ -76,26 +76,28 @@ Front Next.js (`apps/web`) e pasta `KIRO/` carregam o **molde** BaseLinker (UX).
 - **Cache:** SQLite `omnichannel_real.db` (`DATABASE_URL`)
 - **Integração ML:** bridge 4MC read-only (`ml_feed_client` + `sync_service`)
 - **UI operacional:** Jinja/HTML em `web_ui.py` em `/app`
-- **Planejado (não operacional neste fluxo):** Postgres multi-tenant, Redis locks, RabbitMQ EDA, Bling, SEFAZ, impressão ZPL (Sprint 4)
+- **Planejado (não operacional neste fluxo):** Postgres multi-tenant, Redis locks, RabbitMQ EDA, sync Bling ao vivo, emissão NF-e, impressão ZPL (Sprint 4)
+- **Pré-config (stub seguro):** Bling OAuth + flags NF-e — ver `docs/BLING_API_STUDY.md` (`BLING_READ_ONLY=true`, `NFE_EMIT_ENABLED=false`)
 
 ---
 
 ## Plugin architecture (future)
 
-A aba **Integrações** em `/app` é um **hub de plugins** (molde BaseLinker): tiles com status honestos (`Conectado` / `Não configurado` / `Em breve`).
+A aba **Integrações** em `/app` é um **hub de plugins** (molde BaseLinker): tiles com status honestos (`Conectado` / `Configurado` / `Aguardando credenciais` / `Em breve`).
 
 | Plugin | Estado hoje | Adapter futuro |
 |---|---|---|
 | **Feed ML 4MC** | **Ao vivo** (URL em settings) | Já é o pipeline de dados |
 | **SQLite cache** | **Ao vivo** | Persistência local da UI |
 | Mercado Livre OAuth direto | Não configurado / stub | OAuth nativo (além do bridge 4MC) |
-| Bling (4M&C, Portal, Max, Star Lude, Brasil) | Em breve / Não configurado | ERP — sem API Bling implementada |
+| Bling (4M&C, Portal, Max, Star Lude, Brasil) | **Configurado** ou **Aguardando credenciais** (env) | ERP API v3 — client stub `bling_client.py` + `/api/v1/bling/*` |
 | Mercado Envios | Em breve | Contas de envio |
-| NF-e / SEFAZ | Em breve | FiscalAgent |
+| NF-e / SEFAZ | Pré-config via Bling (homologação; emissão off) | FiscalAgent — emissão só após homologação |
 | Base.printer | Em breve | Impressão remota / ZPL (Sprint 4) |
 
 Catálogo editável: `apps/api/src/domain/integration_plugins.py` (`build_integration_plugins` / lista de tiles).  
-**Regra:** só marcar `connected` quando houver wiring real. Stubs mostram toast de roadmap — não fingir conexão Bling/NF.
+**Regra:** só marcar `connected` quando houver wiring real. Bling/NF usam `configured` / `awaiting_credentials` — **não** fingir conexão ao vivo.  
+Estudo: `docs/BLING_API_STUDY.md`.
 
 ---
 
@@ -103,7 +105,8 @@ Catálogo editável: `apps/api/src/domain/integration_plugins.py` (`build_integr
 
 1. ML **somente leitura** neste produto, salvo aprovação explícita para escrita.
 2. Não devolver `access_token` do endpoint `/ml/token` para o browser.
-3. Isolamento multi-tenant / JWT / AES — visão enterprise futura; o fluxo local atual é single-operator + SQLite.
+3. Bling **somente leitura** por default (`BLING_READ_ONLY=true`); emissão NF-e exige `NFE_EMIT_ENABLED=true` + homologação — nunca secrets no git.
+4. Isolamento multi-tenant / JWT / AES — visão enterprise futura; o fluxo local atual é single-operator + SQLite.
 
 ---
 

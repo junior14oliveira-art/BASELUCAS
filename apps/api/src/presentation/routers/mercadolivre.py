@@ -31,19 +31,12 @@ from src.infrastructure.mercadolivre_client import (
     MercadoLivreClient,
     MercadoLivreError,
     MercadoLivreAuthError,
-    MercadoLivreReadOnlyError,
     generate_pkce_pair,
     is_configured,
 )
 from src.infrastructure.ml_sync_service import build_client, get_account, ml_sync_service
 
 router = APIRouter(prefix="/ml", tags=["Mercado Livre"])
-
-ML_READ_ONLY_DETAIL = (
-    "Somente leitura — em construção. Escritas no Mercado Livre (estoque, preço, "
-    "anúncios, respostas a perguntas, etc.) estão bloqueadas até homologação. "
-    "Defina ML_READ_ONLY=false apenas após aprovação explícita."
-)
 
 # Guarda state -> code_verifier entre o início do OAuth e o callback.
 # Em produção com múltiplas réplicas isso deve migrar para o Redis.
@@ -114,15 +107,7 @@ async def _require_account(ml_user_id: Optional[int] = None) -> MLAccountDB:
     return account
 
 
-def _assert_ml_writes_allowed() -> None:
-    """Bloqueia endpoints que mutam o ML enquanto ML_READ_ONLY=True (default)."""
-    if settings.ML_READ_ONLY:
-        raise HTTPException(status_code=403, detail=ML_READ_ONLY_DETAIL)
-
-
 def _handle_ml_error(exc: MercadoLivreError) -> HTTPException:
-    if isinstance(exc, MercadoLivreReadOnlyError):
-        return HTTPException(status_code=403, detail=exc.message)
     status = 401 if isinstance(exc, MercadoLivreAuthError) else (exc.status_code or 502)
     if status < 400:
         status = 502
@@ -143,7 +128,6 @@ async def integration_status():
 
     return {
         "configured": is_configured(),
-        "ml_read_only": bool(settings.ML_READ_ONLY),
         "site_id": settings.ML_SITE_ID,
         "redirect_uri": settings.ML_REDIRECT_URI,
         "connected_accounts": len(accounts),
@@ -161,11 +145,6 @@ async def integration_status():
         "setup_hint": (
             None if is_configured()
             else "Preencha ML_CLIENT_ID e ML_CLIENT_SECRET no arquivo apps/api/.env"
-        ),
-        "write_policy": (
-            "Somente leitura — em construção"
-            if settings.ML_READ_ONLY
-            else "Escritas liberadas (homologação)"
         ),
     }
 
@@ -443,8 +422,7 @@ async def get_listing(item_id: str, refresh: bool = Query(False, description="Bu
 
 @router.put("/listings/{item_id}/price")
 async def update_price(item_id: str, payload: PriceUpdate, ml_user_id: Optional[int] = Query(None)):
-    """Altera o preço do anúncio no Mercado Livre — bloqueado com ML_READ_ONLY."""
-    _assert_ml_writes_allowed()
+    """Altera o preço do anúncio no Mercado Livre."""
     account = await _require_account(ml_user_id)
     try:
         return await ml_sync_service.push_price(account, item_id, payload.price)
@@ -454,12 +432,11 @@ async def update_price(item_id: str, payload: PriceUpdate, ml_user_id: Optional[
 
 @router.put("/listings/{item_id}/stock")
 async def update_stock(item_id: str, payload: StockUpdate, ml_user_id: Optional[int] = Query(None)):
-    """Altera a quantidade disponível do anúncio — bloqueado com ML_READ_ONLY."""
-    _assert_ml_writes_allowed()
+    """Altera a quantidade disponível do anúncio."""
     account = await _require_account(ml_user_id)
     client = await build_client(account)
     try:
-        response = await client.update_item_stock(item_id, payload.quantity, allow_write=True)
+        response = await client.update_item_stock(item_id, payload.quantity)
     except MercadoLivreError as exc:
         raise _handle_ml_error(exc)
 
@@ -475,11 +452,10 @@ async def update_stock(item_id: str, payload: StockUpdate, ml_user_id: Optional[
 
 @router.post("/listings/{item_id}/pause")
 async def pause_listing(item_id: str, ml_user_id: Optional[int] = Query(None)):
-    _assert_ml_writes_allowed()
     account = await _require_account(ml_user_id)
     client = await build_client(account)
     try:
-        await client.pause_item(item_id, allow_write=True)
+        await client.pause_item(item_id)
     except MercadoLivreError as exc:
         raise _handle_ml_error(exc)
 
@@ -494,11 +470,10 @@ async def pause_listing(item_id: str, ml_user_id: Optional[int] = Query(None)):
 
 @router.post("/listings/{item_id}/activate")
 async def activate_listing(item_id: str, ml_user_id: Optional[int] = Query(None)):
-    _assert_ml_writes_allowed()
     account = await _require_account(ml_user_id)
     client = await build_client(account)
     try:
-        await client.activate_item(item_id, allow_write=True)
+        await client.activate_item(item_id)
     except MercadoLivreError as exc:
         raise _handle_ml_error(exc)
 
@@ -513,8 +488,11 @@ async def activate_listing(item_id: str, ml_user_id: Optional[int] = Query(None)
 
 @router.post("/listings/bulk-update")
 async def bulk_update_listings(payload: BulkUpdateRequest, ml_user_id: Optional[int] = Query(None)):
-    """Atualiza preço e/ou estoque — bloqueado com ML_READ_ONLY."""
-    _assert_ml_writes_allowed()
+    """Atualiza preço e/ou estoque de vários anúncios de uma vez.
+
+    Processa item a item e devolve o resultado individual — uma falha em um
+    anúncio não impede os demais.
+    """
     account = await _require_account(ml_user_id)
     client = await build_client(account)
 
@@ -532,7 +510,7 @@ async def bulk_update_listings(payload: BulkUpdateRequest, ml_user_id: Optional[
             continue
 
         try:
-            await client.update_item(update.item_id, fields, allow_write=True)
+            await client.update_item(update.item_id, fields)
             succeeded.append({"item_id": update.item_id, **fields})
         except MercadoLivreError as exc:
             failed.append({"item_id": update.item_id, "error": exc.message})
@@ -554,8 +532,7 @@ async def bulk_update_listings(payload: BulkUpdateRequest, ml_user_id: Optional[
 
 @router.post("/listings")
 async def create_listing(payload: CreateListingRequest, ml_user_id: Optional[int] = Query(None)):
-    """Publica um novo anúncio — bloqueado com ML_READ_ONLY."""
-    _assert_ml_writes_allowed()
+    """Publica um novo anúncio no Mercado Livre."""
     account = await _require_account(ml_user_id)
     client = await build_client(account)
 
@@ -577,11 +554,9 @@ async def create_listing(payload: CreateListingRequest, ml_user_id: Optional[int
     }
 
     try:
-        created = await client.create_item(item_data, allow_write=True)
+        created = await client.create_item(item_data)
         if payload.description:
-            await client.update_item_description(
-                created["id"], payload.description, allow_write=True
-            )
+            await client.update_item_description(created["id"], payload.description)
     except MercadoLivreError as exc:
         raise _handle_ml_error(exc)
 
@@ -594,8 +569,7 @@ async def create_listing(payload: CreateListingRequest, ml_user_id: Optional[int
 
 @router.post("/listings/push-stock")
 async def push_stock_by_sku(payload: StockPushRequest, ml_user_id: Optional[int] = Query(None)):
-    """Propaga estoque por SKU — bloqueado com ML_READ_ONLY."""
-    _assert_ml_writes_allowed()
+    """Propaga o estoque de um SKU interno para todos os anúncios vinculados."""
     account = await _require_account(ml_user_id)
     try:
         return await ml_sync_service.push_stock(account, payload.sku, payload.quantity)
@@ -857,12 +831,11 @@ async def list_questions(status: str = Query("UNANSWERED"), limit: int = Query(1
 @router.post("/questions/{question_id}/answer")
 async def answer_question(question_id: int, payload: AnswerRequest,
                           ml_user_id: Optional[int] = Query(None)):
-    """Responde uma pergunta no anúncio — bloqueado com ML_READ_ONLY."""
-    _assert_ml_writes_allowed()
+    """Responde uma pergunta no anúncio."""
     account = await _require_account(ml_user_id)
     client = await build_client(account)
     try:
-        await client.answer_question(question_id, payload.text, allow_write=True)
+        await client.answer_question(question_id, payload.text)
     except MercadoLivreError as exc:
         raise _handle_ml_error(exc)
 

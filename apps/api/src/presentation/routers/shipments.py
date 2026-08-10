@@ -88,13 +88,39 @@ async def create_shipment(payload: Dict[str, Any]):
 
 @router.get("/{shipment_id}/label")
 async def generate_shipping_label(shipment_id: str):
-    """Stub de etiqueta — ZPL real = Fase 4."""
+    """Resolve pedido pelo shipping_id → gate ML + links de preview (sem PDF falso)."""
+    from src.infrastructure import ml_shipping_labels as ml_labels
+
+    async with async_session() as session:
+        row = (
+            await session.execute(
+                select(RealOrderDB).where(RealOrderDB.shipping_id == shipment_id)
+            )
+        ).scalars().first()
+    if not row:
+        return {
+            "status": "STUB",
+            "shipment_id": shipment_id,
+            "message": (
+                "Shipment não ligado a pedido no SQLite. "
+                "Use GET /api/v1/orders/{{id}}/label ou /label/preview."
+            ),
+            "label_url": None,
+            "ml_write": False,
+            "ml_read_only": bool(settings.ML_READ_ONLY),
+            "docs": "docs/LABELS_ML.md",
+        }
+    account = await ml_labels.get_active_ml_account()
+    gate = ml_labels.evaluate_production_gate(
+        has_oauth=account is not None,
+        has_token=bool(account and (account.access_token or "").strip()),
+        shipment_id=shipment_id,
+        shipping_status=row.shipping_status or "",
+    )
     return {
-        "status": "STUB",
+        **gate.as_detail(),
         "shipment_id": shipment_id,
-        "message": "Impressão ZPL Direct ainda não liberada (Fase 4). Use Pick & Pack para validar bipagem.",
-        "label_url": None,
-        "zpl_code": f"^XA^FO50,50^ADN,36,20^FDSTUB {shipment_id}^FS^XZ",
-        "ml_write": False,
-        "ml_read_only": bool(settings.ML_READ_ONLY),
+        "order_id": row.id,
+        "preview_url": f"/api/v1/orders/{row.id}/label/preview",
+        "label_url": f"/api/v1/orders/{row.id}/label?format=pdf",
     }

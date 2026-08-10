@@ -206,10 +206,12 @@ class MercadoLivreSyncService:
                 ))
 
                 # Espelho na tabela unificada consumida pelo dashboard e agentes.
+                from src.infrastructure.order_customer import buyer_name_for_sync
+
                 await session.merge(RealOrderDB(
                     id=f"ML-{order_id}",
                     external_id=order_id,
-                    customer_name=buyer.get("nickname", "") or "Comprador Mercado Livre",
+                    customer_name=buyer_name_for_sync(o) or "—",
                     customer_email=buyer.get("email", "") or "",
                     customer_phone="",
                     status_id=0,
