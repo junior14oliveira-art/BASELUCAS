@@ -197,6 +197,12 @@ async def get_web_ui():
     .status-pill {{ display: inline-block; padding: 4px 10px; border-radius: 4px; color: #FFF; font-size: 0.72rem; font-weight: 700; }}
     .carrier-tag {{ display: inline-block; padding: 2px 6px; border-radius: 4px; font-size: 0.68rem; font-weight: 700; }}
 
+    /* Filtro de período do dashboard */
+    .dash-period-btn {{ background: transparent; color: var(--text-muted); border: 1px solid var(--border); padding: 6px 14px; border-radius: 6px; font-size: 0.78rem; font-weight: 700; cursor: pointer; transition: all 0.15s; font-family: inherit; }}
+    .dash-period-btn:hover {{ border-color: var(--primary); color: var(--primary); background: var(--blue-light); }}
+    .dash-period-btn:focus-visible {{ outline: 2px solid var(--primary); outline-offset: 2px; }}
+    .dash-period-btn.active {{ background: var(--primary); color: #FFF; border-color: var(--primary); }}
+
     .kpi-grid {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }}
     .kpi-title {{ font-size: 0.72rem; font-family: 'JetBrains Mono', monospace; font-weight: 700; color: var(--text-muted); text-transform: uppercase; margin-bottom: 8px; }}
     .kpi-value {{ font-size: 1.5rem; font-weight: 800; color: #FFF; }}
@@ -367,34 +373,56 @@ async def get_web_ui():
             </div>
           </div>
 
+          <!-- Filtro de período do dashboard -->
+          <div class="card" style="margin-bottom:20px; padding:14px 18px;">
+            <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
+              <span style="font-family:'JetBrains Mono',monospace; font-size:0.7rem; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:var(--text-muted);">Vendas de</span>
+              <div style="display:flex; gap:6px; flex-wrap:wrap;">
+                <button class="dash-period-btn active" data-period="total" onclick="setDashPeriod('total', this)">Total</button>
+                <button class="dash-period-btn" data-period="hoje" onclick="setDashPeriod('hoje', this)">Hoje</button>
+                <button class="dash-period-btn" data-period="ontem" onclick="setDashPeriod('ontem', this)">Ontem</button>
+                <button class="dash-period-btn" data-period="7dias" onclick="setDashPeriod('7dias', this)">7 dias</button>
+                <button class="dash-period-btn" data-period="30dias" onclick="setDashPeriod('30dias', this)">30 dias</button>
+                <button class="dash-period-btn" data-period="custom" onclick="setDashPeriod('custom', this)">Personalizado</button>
+              </div>
+              <div id="dash-custom-range" style="display:none; align-items:center; gap:8px;">
+                <label for="dash-date-from" style="font-size:0.75rem; color:var(--text-muted);">De</label>
+                <input type="date" id="dash-date-from" onchange="renderDashboard()" style="background:var(--surface); border:1px solid var(--border); color:var(--text); border-radius:4px; padding:4px 8px; font-size:0.78rem;">
+                <label for="dash-date-to" style="font-size:0.75rem; color:var(--text-muted);">até</label>
+                <input type="date" id="dash-date-to" onchange="renderDashboard()" style="background:var(--surface); border:1px solid var(--border); color:var(--text); border-radius:4px; padding:4px 8px; font-size:0.78rem;">
+              </div>
+              <span id="dash-period-summary" style="margin-left:auto; font-size:0.78rem; color:var(--text-muted);"></span>
+            </div>
+          </div>
+
           <!-- KPIs Row -->
           <div class="kpi-grid" style="margin-bottom:20px;">
             <div class="card">
-              <div class="kpi-title">STATUSES NO BANCO</div>
-              <div class="kpi-value">{len(statuses_list)} status</div>
-              <span class="badge" style="background:rgba(16,185,129,0.2); color:var(--green); margin-top:8px;">IDs do cache SQLite</span>
+              <div class="kpi-title">PEDIDOS NO PERÍODO</div>
+              <div class="kpi-value" id="kpi-orders">{len(orders_list)} pedidos</div>
+              <div style="font-size:0.75rem; color:var(--text-muted); margin-top:8px;" id="kpi-orders-hint">Consulta instantânea local</div>
             </div>
             <div class="card">
-              <div class="kpi-title">PEDIDOS GRAVADOS</div>
-              <div class="kpi-value">{len(orders_list)} pedidos</div>
-              <div style="font-size:0.75rem; color:var(--text-muted); margin-top:8px;">Consulta instantânea local</div>
+              <div class="kpi-title">FATURAMENTO NO PERÍODO</div>
+              <div class="kpi-value" id="kpi-revenue">R$ {total_revenue:,.2f}</div>
+              <div style="font-size:0.75rem; color:var(--text-muted); margin-top:8px;" id="kpi-revenue-hint">Soma dos {len(orders_list)} pedidos carregados</div>
+            </div>
+            <div class="card">
+              <div class="kpi-title">TICKET MÉDIO</div>
+              <div class="kpi-value" id="kpi-ticket">—</div>
+              <div style="font-size:0.75rem; color:var(--text-muted); margin-top:8px;">Faturamento ÷ pedidos do período</div>
             </div>
             <div class="card">
               <div class="kpi-title">PRODUTOS NO BANCO</div>
               <div class="kpi-value">{total_products_count} SKUs</div>
-              <div style="font-size:0.75rem; color:var(--text-muted); margin-top:8px;">Total no inventário sincronizado</div>
-            </div>
-            <div class="card">
-              <div class="kpi-title">FATURAMENTO DOS PEDIDOS</div>
-              <div class="kpi-value">R$ {total_revenue:,.2f}</div>
-              <div style="font-size:0.75rem; color:var(--text-muted); margin-top:8px;">Soma dos {len(orders_list)} pedidos carregados</div>
+              <div style="font-size:0.75rem; color:var(--text-muted); margin-top:8px;">{len(statuses_list)} filas · total sincronizado</div>
             </div>
           </div>
 
           <!-- Charts Grid (Apenas os Gráficos no Dashboard) -->
           <div class="dashboard-grid" style="height: 380px;">
             <div class="card" style="display:flex; flex-direction:column;">
-              <h3 style="font-size:0.95rem; font-weight:700; color:#fff; margin-bottom:16px;">📈 Volume de Pedidos por Dia — Últimos 7 dias</h3>
+              <h3 style="font-size:0.95rem; font-weight:700; color:#fff; margin-bottom:16px;">📈 Volume de Pedidos por Dia <span id="chart-period-label" style="font-weight:500; color:var(--text-muted);"></span></h3>
               <div style="flex:1; position:relative;">
                 <canvas id="ordersChart"></canvas>
               </div>
@@ -1174,9 +1202,10 @@ function openOrderModal(mode = 'NEW') {{
       return '#ea864d';
     }}
 
-    function distribuicaoPorStatus() {{
+    function distribuicaoPorStatus(lista) {{
+      const base = Array.isArray(lista) ? lista : REAL_ORDERS;
       const counts = {{}};
-      REAL_ORDERS.forEach(o => {{
+      base.forEach(o => {{
         counts[o.status] = (counts[o.status] || 0) + 1;
       }});
       const labels = Object.keys(counts);
@@ -1184,23 +1213,165 @@ function openOrderModal(mode = 'NEW') {{
       return {{ labels, valores }};
     }}
 
-    function initCharts() {{
+    // ---------- Filtro de período do dashboard ----------
+    let dashPeriod = 'total';
+    let ordersChartRef = null;
+    let statusChartRef = null;
+
+    const DASH_PERIOD_LABELS = {{
+      total: 'todo o período',
+      hoje: 'hoje',
+      ontem: 'ontem',
+      '7dias': 'últimos 7 dias',
+      '30dias': 'últimos 30 dias',
+      custom: 'período personalizado'
+    }};
+
+    function startOfDay(d) {{ const x = new Date(d); x.setHours(0, 0, 0, 0); return x; }}
+    function endOfDay(d) {{ const x = new Date(d); x.setHours(23, 59, 59, 999); return x; }}
+
+    // Intervalo real coberto pelo cache — usado quando o recorte volta vazio.
+    function cacheDateRange() {{
+      const datas = REAL_ORDERS.map(o => parseOrderDate(o.date)).filter(Boolean);
+      if (!datas.length) return {{ min: null, max: null }};
+      return {{ min: new Date(Math.min(...datas)), max: new Date(Math.max(...datas)) }};
+    }}
+
+    function dashRange() {{
+      const now = new Date();
+      if (dashPeriod === 'hoje') return {{ from: startOfDay(now), to: endOfDay(now) }};
+      if (dashPeriod === 'ontem') {{
+        const y = new Date(now); y.setDate(y.getDate() - 1);
+        return {{ from: startOfDay(y), to: endOfDay(y) }};
+      }}
+      if (dashPeriod === '7dias') {{
+        const d = new Date(now); d.setDate(d.getDate() - 6);
+        return {{ from: startOfDay(d), to: endOfDay(now) }};
+      }}
+      if (dashPeriod === '30dias') {{
+        const d = new Date(now); d.setDate(d.getDate() - 29);
+        return {{ from: startOfDay(d), to: endOfDay(now) }};
+      }}
+      if (dashPeriod === 'custom') {{
+        const f = document.getElementById('dash-date-from')?.value;
+        const t = document.getElementById('dash-date-to')?.value;
+        return {{
+          from: f ? new Date(f + 'T00:00:00') : null,
+          to: t ? new Date(t + 'T23:59:59') : null
+        }};
+      }}
+      return {{ from: null, to: null }};
+    }}
+
+    function dashFilteredOrders() {{
+      const {{ from, to }} = dashRange();
+      if (!from && !to) return REAL_ORDERS.slice();
+      return REAL_ORDERS.filter(o => {{
+        const od = parseOrderDate(o.date);
+        if (!od) return false;
+        if (from && od < from) return false;
+        if (to && od > to) return false;
+        return true;
+      }});
+    }}
+
+    function setDashPeriod(preset, btn) {{
+      dashPeriod = preset;
+      const custom = document.getElementById('dash-custom-range');
+      if (custom) custom.style.display = (preset === 'custom') ? 'flex' : 'none';
+      document.querySelectorAll('.dash-period-btn').forEach(b => b.classList.remove('active'));
+      if (btn) btn.classList.add('active');
+      renderDashboard();
+    }}
+
+    // Série temporal real: por hora quando o recorte é curto, por dia no resto.
+    function buildOrdersSeries(orders) {{
+      const {{ from, to }} = dashRange();
+      const datas = orders.map(o => parseOrderDate(o.date)).filter(Boolean);
+      const ini = from || (datas.length ? new Date(Math.min(...datas)) : new Date());
+      const fim = to || (datas.length ? new Date(Math.max(...datas)) : new Date());
+      const spanDias = Math.max(1, Math.round((endOfDay(fim) - startOfDay(ini)) / 86400000));
+      const porHora = spanDias <= 1;
+
+      const buckets = new Map();
+      if (porHora) {{
+        for (let h = 0; h < 24; h++) buckets.set(String(h).padStart(2, '0') + 'h', 0);
+      }} else {{
+        const limite = Math.min(spanDias, 60);
+        for (let i = limite - 1; i >= 0; i--) {{
+          const d = new Date(endOfDay(fim)); d.setDate(d.getDate() - i);
+          buckets.set(String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0'), 0);
+        }}
+      }}
+
+      orders.forEach(o => {{
+        const d = parseOrderDate(o.date);
+        if (!d) return;
+        const chave = porHora
+          ? String(d.getHours()).padStart(2, '0') + 'h'
+          : String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0');
+        if (buckets.has(chave)) buckets.set(chave, buckets.get(chave) + 1);
+      }});
+
+      return {{ labels: [...buckets.keys()], valores: [...buckets.values()] }};
+    }}
+
+    function renderDashboard() {{
+      const orders = dashFilteredOrders();
+      const total = orders.reduce((s, o) => s + (Number(o.price) || 0), 0);
+      const ticket = orders.length ? total / orders.length : 0;
+      const brl = v => 'R$ ' + Number(v).toLocaleString('pt-BR', {{ minimumFractionDigits: 2, maximumFractionDigits: 2 }});
+
+      const elOrders = document.getElementById('kpi-orders');
+      const elRevenue = document.getElementById('kpi-revenue');
+      const elTicket = document.getElementById('kpi-ticket');
+      if (elOrders) elOrders.textContent = orders.length + ' pedidos';
+      if (elRevenue) elRevenue.textContent = brl(total);
+      if (elTicket) elTicket.textContent = orders.length ? brl(ticket) : '—';
+
+      const rotulo = DASH_PERIOD_LABELS[dashPeriod] || '';
+      const hintOrders = document.getElementById('kpi-orders-hint');
+      const hintRevenue = document.getElementById('kpi-revenue-hint');
+      if (hintOrders) hintOrders.textContent = 'Recorte: ' + rotulo;
+      if (hintRevenue) hintRevenue.textContent = 'Soma dos ' + orders.length + ' pedidos do recorte';
+
+      const resumo = document.getElementById('dash-period-summary');
+      if (resumo) {{
+        const {{ from, to }} = dashRange();
+        const fmt = d => d ? d.toLocaleDateString('pt-BR') : '';
+        if (!orders.length && REAL_ORDERS.length) {{
+          // Recorte vazio: dizer onde os dados realmente estão, em vez de só mostrar zero.
+          const cache = cacheDateRange();
+          resumo.innerHTML = '<span style="color:var(--amber); font-weight:600;">Nenhum pedido neste recorte.</span> '
+            + 'O cache vai de ' + fmt(cache.min) + ' a ' + fmt(cache.max) + ' — sincronize para trazer vendas recentes.';
+        }} else {{
+          resumo.textContent = (from || to)
+            ? (fmt(from) + ' até ' + fmt(to) + ' · ' + orders.length + ' de ' + REAL_ORDERS.length + ' pedidos')
+            : (REAL_ORDERS.length + ' pedidos no cache');
+        }}
+      }}
+      const chartLabel = document.getElementById('chart-period-label');
+      if (chartLabel) chartLabel.textContent = '— ' + rotulo;
+
+      initCharts(orders);
+    }}
+
+    function initCharts(lista) {{
       const canvas1 = document.getElementById('ordersChart');
       const canvas2 = document.getElementById('statusChart');
       if (!canvas1 || !canvas2) return;
+      const orders = Array.isArray(lista) ? lista : dashFilteredOrders();
 
-      // 1. Line Chart: Pedidos por dia
-      const days = {{
-        "04/08": 12, "05/08": 19, "06/08": 25, "07/08": 42, "08/08": 38, "09/08": 45, "10/08": 50
-      }};
-
-      new Chart(canvas1.getContext('2d'), {{
+      // 1. Line Chart: volume real do recorte selecionado
+      const serie = buildOrdersSeries(orders);
+      if (ordersChartRef) ordersChartRef.destroy();
+      ordersChartRef = new Chart(canvas1.getContext('2d'), {{
         type: 'line',
         data: {{
-          labels: Object.keys(days),
+          labels: serie.labels,
           datasets: [{{
             label: 'Pedidos',
-            data: Object.values(days),
+            data: serie.valores,
             borderColor: '#0066FF',
             backgroundColor: 'rgba(0, 102, 255, 0.15)',
             fill: true,
@@ -1213,21 +1384,22 @@ function openOrderModal(mode = 'NEW') {{
           maintainAspectRatio: false,
           plugins: {{ legend: {{ display: false }} }},
           scales: {{
-            x: {{ grid: {{ color: 'rgba(255,255,255,0.05)' }}, ticks: {{ color: '#94A3B8' }} }},
-            y: {{ grid: {{ color: 'rgba(255,255,255,0.05)' }}, ticks: {{ color: '#94A3B8' }} }}
+            x: {{ grid: {{ color: 'rgba(255,255,255,0.05)' }}, ticks: {{ color: '#94A3B8', maxTicksLimit: 12 }} }},
+            y: {{ beginAtZero: true, grid: {{ color: 'rgba(255,255,255,0.05)' }}, ticks: {{ color: '#94A3B8', precision: 0 }} }}
           }}
         }}
       }});
 
-      // 2. Doughnut Chart: Distribuição por Status
-      const dist = distribuicaoPorStatus();
-      new Chart(canvas2.getContext('2d'), {{
+      // 2. Doughnut Chart: Distribuição por Status (mesmo recorte)
+      const dist = distribuicaoPorStatus(orders);
+      if (statusChartRef) statusChartRef.destroy();
+      statusChartRef = new Chart(canvas2.getContext('2d'), {{
         type: 'doughnut',
         data: {{
-          labels: dist.labels.length ? dist.labels : ['Sem pedidos'],
+          labels: dist.labels.length ? dist.labels : ['Sem pedidos no período'],
           datasets: [{{
             data: dist.valores.length ? dist.valores : [1],
-            backgroundColor: dist.labels.length ? dist.labels.map(l => getStatusColor(l)) : ['#0066FF'],
+            backgroundColor: dist.labels.length ? dist.labels.map(l => getStatusColor(l)) : ['#334155'],
             borderWidth: 0
           }}]
         }},
@@ -2310,7 +2482,7 @@ if (dateFrom) {{
     refreshBlingCardStatus();
     refreshMlDirectCardStatus();
 
-    setTimeout(initCharts, 100);
+    setTimeout(renderDashboard, 100);
   </script>
 </body>
 </html>
