@@ -505,7 +505,7 @@
               </div>
               <div role="button" tabindex="0" onclick="openBlingModal()" onkeydown="if(event.key==='Enter')openBlingModal()" style="background:#14171d; padding:16px; border-radius:8px; border:1px solid var(--border); cursor:pointer; transition:border-color .15s;" onmouseover="this.style.borderColor='#F59E0B'" onmouseout="this.style.borderColor='var(--border)'">
                 <strong style="color:#FFF;">Bling ERP</strong>
-                <p style="font-size:0.72rem; color:var(--text-muted); margin-top:2px;">OAuth v3 — Macro Fiscal</p>
+                <p style="font-size:0.72rem; color:var(--text-muted); margin-top:2px;">OAuth v3 — Macro Fiscal · <strong style="color:#FBBF24;">SOMENTE LEITURA</strong></p>
                 <p id="bling-card-status" style="font-size:0.75rem; color:var(--amber); margin-top:6px;">● Carregando…</p>
               </div>
               <div style="background:#14171d; padding:16px; border-radius:8px; border:1px solid var(--border); opacity:0.85;">
@@ -654,7 +654,7 @@
               <span class="tutorial-badge amber">🟡 Em andamento</span>
               <div>
                 <strong style="color:#FFF;">Etapa 2 — Bling / NF-e</strong>
-                <p style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">Módulo de conexão (Client ID/Secret, OAuth, push de pedido) existe. Emissão de NF-e ainda <strong style="color:#FBBF24;">gated</strong> (<code>NFE_EMIT_ENABLED=false</code>).</p>
+                <p style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">Módulo de conexão (Client ID/Secret, OAuth) existe em <strong style="color:#FBBF24;">SOMENTE LEITURA</strong> (<code>BLING_READ_ONLY=true</code>). Push e NF-e gated (<code>NFE_EMIT_ENABLED=false</code>) até homologar.</p>
               </div>
             </div>
             <div class="roadmap-row">
@@ -727,7 +727,7 @@
               <div class="tutorial-step-num">6</div>
               <div>
                 <strong style="color:#FFF;">Enviar para Bling (NF-e)</strong>
-                <p style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">Selecione pedidos → botão verde na toolbar. Cria/envia pedido de venda no Bling. <strong style="color:#FBBF24;">NF-e real só com NFE_EMIT_ENABLED=true</strong> — hoje costuma ficar bloqueada/gated.</p>
+                <p style="font-size:0.78rem; color:var(--text-muted); margin-top:4px;">Selecione pedidos → botão verde na toolbar. Hoje em <strong style="color:#FBBF24;">SOMENTE LEITURA</strong>: o push é bloqueado (<code>BLING_READ_ONLY=true</code>). NF-e real só com <code>NFE_EMIT_ENABLED=true</code> após liberar a flag.</p>
               </div>
             </div>
             <div class="tutorial-step">
@@ -808,6 +808,11 @@
       <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:12px;">
         Cadastre o app em <strong style="color:#F59E0B;">developer.bling.com.br</strong>.
         Redirect URI: <code id="bling-redirect-uri" style="color:#38BDF8;">http://localhost:3000/api/v1/base/bling/callback</code>
+      </p>
+      <p style="font-size:0.78rem; color:#FBBF24; margin-bottom:12px; padding:10px 12px; border-radius:6px; border:1px solid rgba(251,191,36,0.35); background:rgba(251,191,36,0.08);">
+        <strong>SOMENTE LEITURA</strong> — a integração Bling inicia e permanece neste modo
+        (<code>BLING_READ_ONLY=true</code>, <code>NFE_EMIT_ENABLED=false</code>) até as flags serem alteradas após homologação.
+        Push de pedido e emissão de NF-e ficam bloqueados.
       </p>
       <p id="bling-modal-status" style="font-size:0.78rem; color:var(--amber); margin-bottom:14px;">Status: —</p>
 
@@ -1013,7 +1018,7 @@
               if (j.ok) ok++; else blocked++;
             } catch (e) { blocked++; }
           }
-          const msg = `Bling: ${ok} processado(s), ${blocked} bloqueado(s)/erro. NF-e só com NFE_EMIT_ENABLED=true.`;
+          const msg = `Bling (SOMENTE LEITURA): ${ok} processado(s), ${blocked} bloqueado(s)/erro. Writes bloqueados com BLING_READ_ONLY=true; NF-e só com NFE_EMIT_ENABLED=true.`;
           _toast(msg, ok ? 'success' : 'warning');
         })();
         return;
@@ -2101,7 +2106,9 @@
         }
         if (modalStatus) {
           modalStatus.style.color = color;
-          modalStatus.innerText = 'Status: ' + label + (data.client_id_masked ? ' · App ' + data.client_id_masked : '');
+          const needsRoTag = (data.read_only || data.bling_read_only) && !/somente\s*leitura/i.test(label);
+          const roTag = needsRoTag ? ' · SOMENTE LEITURA' : '';
+          modalStatus.innerText = 'Status: ' + label + roTag + (data.client_id_masked ? ' · App ' + data.client_id_masked : '');
         }
         if (redirectEl && data.redirect_uri) {
           redirectEl.textContent = data.redirect_uri;

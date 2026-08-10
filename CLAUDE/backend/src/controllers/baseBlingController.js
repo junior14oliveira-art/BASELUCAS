@@ -7,7 +7,15 @@
  *   API    → https://api.bling.com.br/Api/v3
  *   OAuth  → https://www.bling.com.br/Api/v3/oauth
  *
- * Flags: BLING_READ_ONLY=true e NFE_EMIT_ENABLED=false (defaults seguros).
+ * ═══════════════════════════════════════════════════════════════════════════
+ * SOMENTE LEITURA (padrão de produção / homologação)
+ * ═══════════════════════════════════════════════════════════════════════════
+ * A integração Bling COMEÇA e permanece em SOMENTE LEITURA até alguém mudar
+ * as flags com consciência:
+ *   - BLING_READ_ONLY=true   (default) → bloqueia POST pedido de venda / writes
+ *   - NFE_EMIT_ENABLED=false (default) → bloqueia emissão real de NF-e
+ * Só liberar writes após homologar OAuth + payload + SEFAZ.
+ * ═══════════════════════════════════════════════════════════════════════════
  */
 
 const crypto = require("crypto");
@@ -22,10 +30,21 @@ const BLING_OAUTH_BASE = (
   process.env.BLING_AUTH_BASE_URL || "https://www.bling.com.br/Api/v3/oauth"
 ).replace(/\/$/, "");
 
+/**
+ * SOMENTE LEITURA — default true (ausência da env = true).
+ * Só retorna false se BLING_READ_ONLY estiver explicitamente "false".
+ * Produção/homologação devem manter true até liberação deliberada.
+ */
 const somenteLeitura = () =>
   String(process.env.BLING_READ_ONLY ?? "true").toLowerCase() !== "false";
+
+/** Emissão NF-e real — default false; exige NFE_EMIT_ENABLED=true explícito. */
 const emissaoLiberada = () =>
   String(process.env.NFE_EMIT_ENABLED ?? "false").toLowerCase() === "true";
+
+const MSG_BLOQUEIO_SOMENTE_LEITURA =
+  "SOMENTE LEITURA (BLING_READ_ONLY=true) — escrita no Bling bloqueada. " +
+  "Pedido NÃO enviado. Defina BLING_READ_ONLY=false somente após homologar.";
 
 const agora = () => new Date().toISOString();
 const accountKeyPadrao = (override) =>
@@ -158,24 +177,33 @@ function statusPayload(cfg) {
   const hasToken = Boolean(String(cfg?.access_token || "").trim());
   const expira = Number(cfg?.expires_at || 0);
   const tokenExpired = Boolean(expira && Date.now() / 1000 >= expira);
+  const ro = somenteLeitura();
+  const tagRo = "SOMENTE LEITURA";
 
   let ui_status = "not_configured";
-  let ui_label = "Não configurado — clique para informar Client ID / Secret";
+  let ui_label = ro
+    ? `Não configurado (${tagRo}) — clique para informar Client ID / Secret`
+    : "Não configurado — clique para informar Client ID / Secret";
   let ui_color = "muted";
 
   if (hasToken && !tokenExpired) {
     ui_status = "configured";
-    ui_label = somenteLeitura()
-      ? "Configurado (somente leitura — NF-e aguarda homologação)"
+    // Conectado/configurado: UI deve deixar explícito o modo somente leitura.
+    ui_label = ro
+      ? `Configurado · ${tagRo} (writes bloqueados — NF-e aguarda homologação)`
       : "Configurado (token ativo — NF-e aguarda homologação)";
     ui_color = "amber";
   } else if (hasToken && tokenExpired) {
     ui_status = "awaiting_credentials";
-    ui_label = "Token expirado — reconecte OAuth ou cole novo token";
+    ui_label = ro
+      ? `Token expirado · ${tagRo} — reconecte OAuth ou cole novo token`
+      : "Token expirado — reconecte OAuth ou cole novo token";
     ui_color = "amber";
   } else if (appOk) {
     ui_status = "awaiting_credentials";
-    ui_label = "App configurado — conclua OAuth ou cole o access token";
+    ui_label = ro
+      ? `App configurado · ${tagRo} — conclua OAuth ou cole o access token`
+      : "App configurado — conclua OAuth ou cole o access token";
     ui_color = "amber";
   }
 
@@ -188,9 +216,10 @@ function statusPayload(cfg) {
     token_expired: tokenExpired,
     account_key: cfg?.account_key || accountKeyPadrao(),
     expires_at: expira,
-    read_only: somenteLeitura(),
-    bling_read_only: somenteLeitura(),
+    read_only: ro,
+    bling_read_only: ro,
     nfe_emit_enabled: emissaoLiberada(),
+    ui_mode: ro ? "somente_leitura" : "leitura_escrita",
     client_id_masked: mask(client_id, 6),
     has_client_secret: Boolean(client_secret),
     redirect_uri: redirectUri(),
@@ -202,6 +231,8 @@ function statusPayload(cfg) {
       ? "Informe client_id e client_secret em POST /base/bling/credentials"
       : !hasToken
       ? "Autorize a conta em GET /base/bling/auth?redirect=true"
+      : ro
+      ? "Integração em SOMENTE LEITURA (BLING_READ_ONLY=true) — push de pedido e NF-e bloqueados"
       : null,
   };
 }
@@ -508,11 +539,12 @@ async function pushOrder(req, res) {
 
     const corpo = montarPedidoVenda(pedido);
 
+    // Write path: bloqueado enquanto SOMENTE LEITURA (default produção/homologação).
     if (somenteLeitura()) {
       return res.json({
         status: "BLOCKED",
-        message:
-          "BLING_READ_ONLY=true — pedido NÃO enviado. Libere a flag após homologar.",
+        read_only: true,
+        message: MSG_BLOQUEIO_SOMENTE_LEITURA,
         bling_write: false,
         payload_preview: corpo,
       });
@@ -539,10 +571,14 @@ async function autoPushPaid(req, res) {
       .filter((o) => /pago|paid|aprovado/i.test(o.status || ""))
       .slice(0, limite);
 
+    // Auto-push também é write path — bloqueado em SOMENTE LEITURA.
     if (somenteLeitura()) {
       return res.json({
         status: "BLOCKED",
-        message: "BLING_READ_ONLY=true — auto-push desativado.",
+        read_only: true,
+        message:
+          "SOMENTE LEITURA (BLING_READ_ONLY=true) — auto-push desativado. " +
+          "Nenhum pedido foi enviado ao Bling.",
         bling_write: false,
         elegiveis: lista.length,
       });
