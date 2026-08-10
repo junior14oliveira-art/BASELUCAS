@@ -201,6 +201,13 @@ async def get_web_ui():
     .modal-overlay {{ position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.7); display: none; align-items: center; justify-content: center; z-index: 1000; }}
     .modal-overlay.open {{ display: flex; }}
     .modal-box {{ background: var(--surface-card); border: 1px solid var(--border); border-radius: 10px; width: 500px; max-width: 90vw; padding: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); color: var(--text); }}
+    .app-toast {{ position: fixed; bottom: 24px; right: 24px; z-index: 2000; min-width: 260px; max-width: 420px; padding: 14px 16px; border-radius: 10px; border: 1px solid var(--border); background: #1e293b; color: #F1F5F9; font-size: 0.85rem; font-weight: 600; display: none; align-items: flex-start; gap: 10px; box-shadow: 0 12px 40px rgba(0,0,0,0.45); }}
+    .app-toast.show {{ display: flex; }}
+    .app-toast.success {{ border-color: #10B981; }}
+    .app-toast.error {{ border-color: #F43F5E; }}
+    .app-toast.info {{ border-color: #38BDF8; }}
+    .app-toast .toast-actions {{ margin-top: 8px; display: flex; gap: 8px; }}
+    .app-toast .toast-actions button {{ background: rgba(255,255,255,0.08); border: 1px solid var(--border); color: #FFF; border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 0.75rem; font-weight: 700; }}
   </style>
 </head>
 <body>
@@ -626,6 +633,36 @@ async def get_web_ui():
     </div>
   </div>
 
+  <!-- Modal: Mercado Livre direto OAuth -->
+  <div class="modal-overlay" id="ml-direct-modal">
+    <div class="modal-box" style="width:560px; background:#0F172A; border:1px solid #334155;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;">
+        <h3 style="margin:0; font-weight:800; color:#FFF;">🟡 Mercado Livre direto (OAuth)</h3>
+        <button type="button" onclick="closeMlDirectModal()" style="background:none; border:none; color:#94A3B8; font-size:1.3rem; cursor:pointer;">✖</button>
+      </div>
+      <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:12px;">
+        App no <strong style="color:#FFE600;">DevCenter ML</strong> — separado do feed 4M&amp;C.
+        Redirect: <code style="color:#38BDF8;">http://localhost:8000/api/v1/ml/auth/callback</code>
+      </p>
+      <p id="ml-direct-modal-status" style="font-size:0.78rem; color:var(--amber); margin-bottom:14px;">Status: —</p>
+
+      <label style="font-size:0.72rem; font-weight:700; color:#94A3B8;">APP ID (CLIENT ID)</label>
+      <input type="text" id="ml-client-id" placeholder="Application ID" style="width:100%; margin:4px 0 12px; padding:10px; border-radius:6px; border:1px solid var(--border); background:var(--bg); color:var(--text); box-sizing:border-box;">
+
+      <label style="font-size:0.72rem; font-weight:700; color:#94A3B8;">SECRET KEY</label>
+      <input type="password" id="ml-client-secret" placeholder="Secret Key" style="width:100%; margin:4px 0 12px; padding:10px; border-radius:6px; border:1px solid var(--border); background:var(--bg); color:var(--text); box-sizing:border-box;">
+
+      <label style="font-size:0.72rem; font-weight:700; color:#94A3B8;">REDIRECT URI</label>
+      <input type="text" id="ml-redirect-uri" placeholder="http://localhost:8000/api/v1/ml/auth/callback" style="width:100%; margin:4px 0 14px; padding:10px; border-radius:6px; border:1px solid var(--border); background:var(--bg); color:var(--text); box-sizing:border-box;">
+
+      <div style="display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end;">
+        <button type="button" class="btn-add-order" style="background:var(--border);" onclick="closeMlDirectModal()">Cancelar</button>
+        <button type="button" class="btn-add-order" style="background:#10B981;" onclick="saveMlDirectCredentials()">Salvar</button>
+        <button type="button" class="btn-add-order" style="background:#FFE600; color:#111;" onclick="startMlDirectOAuth()">Conectar OAuth ↗</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Modal: Detalhes do Produto -->
   <div class="modal-overlay" id="product-detail-modal">
     <div class="modal-box" style="width:650px; background:#0F172A; border:1px solid #334155; border-radius:12px; padding:24px;">
@@ -685,6 +722,8 @@ async def get_web_ui():
     </div>
   </div>
 
+  <div id="app-toast" class="app-toast" role="status" aria-live="polite"></div>
+  <script src="/app/static/app_ux.js"></script>
   <script>
     const REAL_STATUSES = {statuses_json};
     const REAL_ORDERS = {orders_json};
@@ -1468,14 +1507,14 @@ async def get_web_ui():
         }}
         alert(data.message || 'Credenciais Bling salvas.');
         await refreshBlingCardStatus();
-        if (typeof showToast === 'function') showToast('Bling: API salva', 'success');
+        _toast('Bling: API salva', 'success');
       }} catch (e) {{
-        alert('Erro ao salvar Bling: ' + (e.message || e));
+        _toast('Erro ao salvar Bling: ' + (e.message || e), 'error');
       }}
     }}
 
     function startBlingOAuth() {{
-      window.location.href = '/api/v1/bling/auth';
+      window.location.href = '/api/v1/bling/auth?redirect=true';
     }}
 
     async function testBlingConnection() {{
@@ -1483,10 +1522,10 @@ async def get_web_ui():
         const res = await fetch('/api/v1/bling/test', {{ method: 'POST' }});
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || data.message || 'Falha no teste');
-        alert(data.message || 'Token Bling válido.');
+        _toast(data.message || 'Token Bling válido.', 'success');
         await refreshBlingCardStatus();
       }} catch (e) {{
-        alert('Teste Bling: ' + (e.message || e));
+        _toast('Teste Bling: ' + (e.message || e), 'error');
       }}
     }}
 
@@ -1495,10 +1534,85 @@ async def get_web_ui():
       try {{
         const res = await fetch('/api/v1/bling/connection', {{ method: 'DELETE' }});
         const data = await res.json();
-        alert(data.message || 'Conexão limpa.');
+        _toast(data.message || 'Conexão limpa.', 'info');
         await refreshBlingCardStatus();
       }} catch (e) {{
-        alert('Erro: ' + (e.message || e));
+        _toast('Erro: ' + (e.message || e), 'error');
+      }}
+    }}
+
+    function _toast(msg, kind) {{
+      if (window.AppUx && AppUx.showToast) AppUx.showToast(msg, kind || 'info');
+      else alert(msg);
+    }}
+
+    async function refreshMlDirectCardStatus() {{
+      const el = document.getElementById('ml-direct-card-status');
+      const modalStatus = document.getElementById('ml-direct-modal-status');
+      try {{
+        const res = await fetch('/api/v1/ml/status');
+        const data = await res.json();
+        const label = data.ui_label || 'Status desconhecido';
+        const color = data.ui_color === 'green' ? 'var(--green)' : (data.ui_color === 'muted' ? 'var(--text-muted)' : 'var(--amber)');
+        if (el) {{ el.style.color = color; el.innerText = '● ' + label; }}
+        if (modalStatus) {{
+          modalStatus.style.color = color;
+          modalStatus.innerText = 'Status: ' + label + (data.client_id_masked ? ' · App ' + data.client_id_masked : '');
+        }}
+        const redir = document.getElementById('ml-redirect-uri');
+        if (redir && data.redirect_uri && !redir.value) redir.value = data.redirect_uri;
+        return data;
+      }} catch (e) {{
+        if (el) {{ el.style.color = 'var(--amber)'; el.innerText = '● Não foi possível ler o status ML'; }}
+        return null;
+      }}
+    }}
+
+    function openMlDirectModal() {{
+      const modal = document.getElementById('ml-direct-modal');
+      if (modal) modal.classList.add('open');
+      refreshMlDirectCardStatus();
+    }}
+
+    function closeMlDirectModal() {{
+      const modal = document.getElementById('ml-direct-modal');
+      if (modal) modal.classList.remove('open');
+    }}
+
+    async function saveMlDirectCredentials() {{
+      const clientId = (document.getElementById('ml-client-id') || {{}}).value || '';
+      const clientSecret = (document.getElementById('ml-client-secret') || {{}}).value || '';
+      const redirectUri = (document.getElementById('ml-redirect-uri') || {{}}).value || '';
+      if (!clientId.trim() || !clientSecret.trim()) {{
+        _toast('Informe App ID e Secret Key do DevCenter ML.', 'info');
+        return;
+      }}
+      try {{
+        const body = {{ client_id: clientId.trim(), client_secret: clientSecret.trim() }};
+        if (redirectUri.trim()) body.redirect_uri = redirectUri.trim();
+        const res = await fetch('/api/v1/ml/credentials', {{
+          method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify(body)
+        }});
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || data.message || 'Falha ao salvar');
+        _toast(data.message || 'Credenciais ML salvas.', 'success');
+        await refreshMlDirectCardStatus();
+      }} catch (e) {{
+        _toast('Erro ML: ' + (e.message || e), 'error');
+      }}
+    }}
+
+    async function startMlDirectOAuth() {{
+      try {{
+        const res = await fetch('/api/v1/ml/auth/url');
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || data.message || 'Falha ao gerar URL OAuth');
+        if (!data.authorization_url) throw new Error('URL de autorização ausente');
+        window.location.href = data.authorization_url;
+      }} catch (e) {{
+        _toast('OAuth ML: ' + (e.message || e), 'error');
       }}
     }}
 
@@ -1519,15 +1633,16 @@ async def get_web_ui():
       if (params.get('tab')) initialTab = params.get('tab');
       if (params.get('bling') === 'ok') {{
         initialTab = 'marketplaces';
-        setTimeout(() => alert('Bling OAuth concluído — tokens salvos.'), 400);
+        setTimeout(() => _toast('Bling OAuth concluído — tokens salvos.', 'success'), 400);
       }}
       if (params.get('bling_error')) {{
         initialTab = 'marketplaces';
-        setTimeout(() => alert('Erro Bling OAuth: ' + params.get('bling_error')), 400);
+        setTimeout(() => _toast('Erro Bling OAuth: ' + params.get('bling_error'), 'error'), 400);
       }}
     }} catch(e) {{}}
     switchTab(initialTab);
     refreshBlingCardStatus();
+    refreshMlDirectCardStatus();
 
     setTimeout(initCharts, 100);
   </script>
