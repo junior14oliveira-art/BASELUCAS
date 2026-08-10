@@ -782,7 +782,7 @@ async def get_web_ui():
           if (od > dTo) return false;
         }}
         
-        return searchMatch(o, q);
+        return matchesSearch([o.id, o.external_id, o.customer, o.item, o.sku, o.channel, o.status]);
       }});
       
       return filtered;
