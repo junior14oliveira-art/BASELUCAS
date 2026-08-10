@@ -36,9 +36,11 @@ function corDaFila(nome) {
 /** GET /api/v1/base/bootstrap */
 async function getBootstrap(req, res) {
   try {
+    // Pedidos/produtos podem ainda não existir no SQLite fresco — devolve vazio
+    // em vez de derrubar o bootstrap (a UI /app precisa dessa resposta 200).
     const [listaPedidos, listaProdutos, totalProdutos, operadores] = await Promise.all([
-      pedidos.listarPedidos({ limit: Number(req.query.orders_limit || 1000) }),
-      produtos.listar({ limit: Number(req.query.products_limit || 200) }),
+      pedidos.listarPedidos({ limit: Number(req.query.orders_limit || 1000) }).catch(() => []),
+      produtos.listar({ limit: Number(req.query.products_limit || 200) }).catch(() => []),
       produtos.contar().catch(() => 0),
       db.query("SELECT * FROM base_operators ORDER BY id ASC"),
     ]);

@@ -71,6 +71,44 @@ async function up() {
     )${engine}
   `);
 
+  // Cache local de pedidos/produtos para o fallback SQLite (Render/dev).
+  // No HostGator, se as tabelas do 4M&C já existem, CREATE IF NOT EXISTS é no-op.
+  // Sem isso o bootstrap estoura "no such table: orders" e a UI /app mostra HTTP 500.
+  const ordersTable = process.env.BASE_ORDERS_TABLE || "orders";
+  const productsTable = process.env.BASE_PRODUCTS_TABLE || "products";
+
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS ${ordersTable} (
+      id VARCHAR(100) PRIMARY KEY,
+      external_id VARCHAR(255) DEFAULT '',
+      customer_name VARCHAR(255) DEFAULT '',
+      customer_email VARCHAR(255) DEFAULT '',
+      customer_phone VARCHAR(100) DEFAULT '',
+      total_amount ${mysql ? "DECIMAL(12,2)" : "REAL"} DEFAULT 0,
+      status_name VARCHAR(255) DEFAULT '',
+      channel_name VARCHAR(100) DEFAULT 'Mercado Livre',
+      items_json TEXT,
+      shipping_id VARCHAR(50) DEFAULT '',
+      tracking_number VARCHAR(255) DEFAULT '',
+      created_at ${ts} DEFAULT NULL
+    )${engine}
+  `);
+
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS ${productsTable} (
+      id VARCHAR(100) PRIMARY KEY,
+      sku VARCHAR(255) DEFAULT '',
+      name VARCHAR(500) DEFAULT '',
+      price ${mysql ? "DECIMAL(12,2)" : "REAL"} DEFAULT 0,
+      stock INT DEFAULT 0,
+      ean VARCHAR(64) DEFAULT '',
+      sold_quantity INT DEFAULT 0,
+      status VARCHAR(50) DEFAULT '',
+      permalink VARCHAR(500) DEFAULT '',
+      thumbnail VARCHAR(500) DEFAULT ''
+    )${engine}
+  `);
+
   // Índices — cada um isolado porque SQLite não aceita IF NOT EXISTS composto
   // em todas as versões e MySQL antigo não aceita IF NOT EXISTS em índice.
   const indices = [
