@@ -237,6 +237,11 @@ def _normalize_order(order: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         or order.get("shipping_status")
     )
     items = _extract_items(order)
+    
+    is_notebook = any("notebook" in str(it.get("name", "")).lower() for it in items)
+    if is_notebook:
+        status_name = "Notebook - Geral"
+
     buyer = order.get("buyer") if isinstance(order.get("buyer"), dict) else {}
     shipping = order.get("shipping") if isinstance(order.get("shipping"), dict) else {}
     shipment = order.get("_shipment") if isinstance(order.get("_shipment"), dict) else {}
@@ -266,7 +271,7 @@ def _normalize_order(order: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "customer_name": _buyer_name(order),
         "customer_email": str(order.get("customer_email") or buyer.get("email") or ""),
         "customer_phone": phone,
-        "status_id": _status_id(status_name),
+        "status_id": _status_id(status_name) if not is_notebook else 3,
         "status_name": status_name,
         "total_amount": _order_amount(order),
         "channel_name": "Mercado Livre",

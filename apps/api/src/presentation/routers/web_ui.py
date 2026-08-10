@@ -349,7 +349,12 @@ async def get_web_ui():
           <div class="card">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
               <h3 style="font-size:1.05rem; font-weight:700; color:#fff;" id="orders-title">Todos os Pedidos ({len(orders_list)})</h3>
-              <div style="display:flex; gap:10px;">
+              <div style="display:flex; gap:10px; align-items:center;">
+                <label style="color:#aaa; font-size:12px;">De:</label>
+                <input type="date" id="filter-date-from" style="background:#1E293B; border:1px solid #334155; color:#fff; border-radius:4px; padding:4px;">
+                <label style="color:#aaa; font-size:12px;">Até:</label>
+                <input type="date" id="filter-date-to" style="background:#1E293B; border:1px solid #334155; color:#fff; border-radius:4px; padding:4px;">
+                <button class="quick-access-btn" style="background:#22a564; color:#FFF; border:none;" onclick="downloadExcel()">📥 Baixar Excel</button>
                 <button class="quick-access-btn" style="background:#0066FF; color:#FFF; border:none;" onclick="openAlterFilaModal()">Alterar fila</button>
                 <button class="btn-add-order" onclick="openOrderModal('NEW')">+ Adicionar Pedido</button>
               </div>
@@ -718,7 +723,7 @@ async def get_web_ui():
               const active = activeStatusFilter === stObj.name ? 'active' : '';
               groupItemsHtml += `
                 <div class="status-tree-item ${{active}}" onclick="filterByStatus('${{stObj.name}}', this)">
-                  <span>${{stObj.name}}</span> <span class="status-badge-count" style="background:${{stObj.color || '#64748B'}};">${{cnt}}</span>
+                  <span><strong style="color:#0066FF;">[${{stObj.id}}]</strong> ${{stObj.name}}</span> <span class="status-badge-count" style="background:${{stObj.color || '#64748B'}};">${{cnt}}</span>
                 </div>`;
             }}
           }}
@@ -733,7 +738,6 @@ async def get_web_ui():
         }}
       }});
 
-      // Outras Filas
       const remaining = REAL_STATUSES.filter(s => !groupedSet.has(s.id));
       if (remaining.length > 0) {{
         html += `<div class="status-group-header">OUTRAS FILAS</div>`;
@@ -742,7 +746,7 @@ async def get_web_ui():
           const active = activeStatusFilter === stObj.name ? 'active' : '';
           html += `
             <div class="status-tree-item ${{active}}" onclick="filterByStatus('${{stObj.name}}', this)">
-              <span>${{stObj.name}}</span> <span class="status-badge-count" style="background:${{stObj.color || '#64748B'}};">${{cnt}}</span>
+              <span><strong style="color:#0066FF;">[${{stObj.id}}]</strong> ${{stObj.name}}</span> <span class="status-badge-count" style="background:${{stObj.color || '#64748B'}};">${{cnt}}</span>
             </div>`;
         }});
       }}
@@ -758,15 +762,37 @@ async def get_web_ui():
       renderCategorizedSidebar();
     }}
 
+    function applyFilters() {{
+      const q = document.getElementById('search-input')?.value || '';
+      const dateFrom = document.getElementById('filter-date-from')?.value;
+      const dateTo = document.getElementById('filter-date-to')?.value;
+      
+      let filtered = REAL_ORDERS.filter(o => {{
+        if (activeStatusFilter !== 'Todos os pedidos' && o.status !== activeStatusFilter) return false;
+        
+        if (dateFrom) {{
+          const dFrom = new Date(dateFrom);
+          const od = new Date(o.created_at);
+          if (od < dFrom) return false;
+        }}
+        if (dateTo) {{
+          const dTo = new Date(dateTo);
+          dTo.setHours(23, 59, 59);
+          const od = new Date(o.created_at);
+          if (od > dTo) return false;
+        }}
+        
+        return searchMatch(o, q);
+      }});
+      
+      return filtered;
+    }}
+
     function renderOrdersTable() {{
       const tbody = document.getElementById('orders-table-body');
       if (!tbody) return;
 
-      const byStatus = activeStatusFilter === 'Todos os pedidos'
-        ? REAL_ORDERS
-        : REAL_ORDERS.filter(o => o.status === activeStatusFilter);
-
-      const filtered = byStatus.filter(o => matchesSearch([o.id, o.external_id, o.customer, o.item, o.sku, o.channel, o.status]));
+      const filtered = applyFilters();
 
       const titleEl = document.getElementById('orders-title');
       if (titleEl) {{
@@ -799,6 +825,38 @@ async def get_web_ui():
       `).join('');
 
       tbody.innerHTML = rowsHtml;
+    }}
+
+    document.getElementById('filter-date-from')?.addEventListener('change', () => {{ renderOrdersTable(); updateOrdersCount(); }});
+    document.getElementById('filter-date-to')?.addEventListener('change', () => {{ renderOrdersTable(); updateOrdersCount(); }});
+
+    function downloadExcel() {{
+      const filtered = applyFilters();
+      if (filtered.length === 0) return alert("Nenhum pedido para baixar.");
+      
+      let csv = "ID,NOME COMPRADOR,EMAIL,TELEFONE,STATUS,TOTAL,DATA\n";
+      filtered.forEach(o => {{
+        const row = [
+          o.id,
+          `"${{o.customer}}"`,
+          `""`, // no email in this UI struct
+          `""`, // no phone in this UI struct
+          `"${{o.status}}"`,
+          o.price,
+          `"${{o.date}}"`
+        ];
+        csv += row.join(",") + "\n";
+      }});
+      
+      const blob = new Blob([csv], {{ type: 'text/csv;charset=utf-8;' }});
+      const link = document.createElement("a");
+      const url = URL.createObjectURL(blob);
+      link.setAttribute("href", url);
+      link.setAttribute("download", "pedidos_baselucas.csv");
+      link.style.visibility = 'hidden';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
     }}
 
     function renderProductsTable() {{
