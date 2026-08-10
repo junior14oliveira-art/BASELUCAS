@@ -1,5 +1,5 @@
 ---
-name: safe-git-workflow
+name: baselucas
 description: Regras obrigatórias de segurança e versionamento para o projeto. Exige que o agente leia a documentação antes de codificar, crie um commit de backup (ponto de restauração) antes de alterações e faça um git push automático após finalizar.
 allowed-tools:
   - "Read"
