@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select, func
-from src.infrastructure.database import async_session, RealOrderStatusDB, RealOrderDB, RealProductDB, OperatorDB
+from src.infrastructure.database import async_session, RealOrderStatusDB, RealOrderDB, RealProductDB, OperatorDB, init_db
 from src.presentation.routers.operators import seed_operators_if_empty
 from src.config import settings
 import json
@@ -18,6 +18,7 @@ async def root_redirect():
 @router.get("/app", response_class=HTMLResponse)
 @router.get("/dashboard-ui", response_class=HTMLResponse)
 async def get_web_ui():
+    await init_db()
     async with async_session() as session:
         # 1. Seed & Fetch Operators
         await seed_operators_if_empty()
@@ -57,6 +58,9 @@ async def get_web_ui():
                 "date": o.created_at.strftime("%d/%m/%Y %H:%M") if o.created_at else "",
                 "shipping_status": getattr(o, "shipping_status", "") or "ready_to_ship",
                 "marketplace_fee": getattr(o, "marketplace_fee", 0.0) or 0.0,
+                "zpl_armed": bool(getattr(o, "zpl_armed", False)) or (getattr(o, "zpl_status", "") or "") == "ready",
+                "shipping_id": getattr(o, "shipping_id", "") or "",
+                "tracking_number": getattr(o, "tracking_number", "") or "",
             })
 
         # 4. Fetch Real Products from Database
@@ -208,6 +212,11 @@ async def get_web_ui():
     .app-toast.info {{ border-color: #38BDF8; }}
     .app-toast .toast-actions {{ margin-top: 8px; display: flex; gap: 8px; }}
     .app-toast .toast-actions button {{ background: rgba(255,255,255,0.08); border: 1px solid var(--border); color: #FFF; border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 0.75rem; font-weight: 700; }}
+    .expedition-scan-wrap {{ display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }}
+    .expedition-scan-input {{ width: 100%; max-width: 520px; padding: 14px 18px; font-size: 1.15rem; font-weight: 700; font-family: 'JetBrains Mono', monospace; letter-spacing: 0.04em; border-radius: 10px; border: 2px solid #22a564; background: #0F172A; color: #FFF; outline: none; box-shadow: 0 0 0 3px rgba(34,165,100,0.15); }}
+    .expedition-scan-input:focus {{ border-color: #38BDF8; box-shadow: 0 0 0 3px rgba(56,189,248,0.2); }}
+    .expedition-badge-ready {{ background: rgba(34,165,100,0.2); color: #34D399; border: 1px solid rgba(34,165,100,0.4); font-size: 0.72rem; font-weight: 800; padding: 3px 8px; border-radius: 12px; }}
+    .expedition-badge-wait {{ background: rgba(234,134,77,0.15); color: #FBBF24; border: 1px solid rgba(234,134,77,0.35); font-size: 0.72rem; font-weight: 800; padding: 3px 8px; border-radius: 12px; }}
   </style>
 </head>
 <body>
@@ -227,6 +236,10 @@ async def get_web_ui():
     </div>
     <div class="rail-item" id="rail-products" title="Inventário & Produtos" onclick="switchTab('products', this)">
       <span class="material-icons">inventory_2</span>
+    </div>
+    <div class="rail-item" id="rail-expedition" title="Expedição — Bipagem & Etiquetas ZPL" onclick="switchTab('expedition', this)">
+      <span class="material-icons">qr_code_scanner</span>
+      <span class="rail-tag" style="background:#22a564; color:#FFF; font-size:0.55rem; margin-top:2px;">PACK</span>
     </div>
     <div class="rail-item" id="rail-automations" title="Automações SE / ENTÃO" onclick="switchTab('automations', this)">
       <span class="material-icons">bolt</span>
@@ -298,13 +311,13 @@ async def get_web_ui():
 
       <div class="action-tools-group">
         <div class="tool-btn" title="Selecionar Todos" onclick="triggerBatchAction('select_all')"><span class="material-icons" style="font-size:18px">check_box</span></div>
-        <div class="tool-btn" title="Favoritar" onclick="triggerBatchAction('star')"><span class="material-icons" style="font-size:18px">star_outline</span></div>
-        <div class="tool-btn" title="Sinalizar" onclick="triggerBatchAction('flag')"><span class="material-icons" style="font-size:18px">flag</span></div>
-        <div class="tool-btn" title="Enviar Email / WhatsApp" onclick="triggerBatchAction('email')"><span class="material-icons" style="font-size:18px">mail_outline</span></div>
-        <div class="tool-btn" title="Imprimir Etiquetas (Base.printer)" onclick="triggerBatchAction('print')"><span class="material-icons" style="font-size:18px">print</span></div>
-        <div class="tool-btn" style="background:#0066FF; color:#FFF; border:none;" title="Despachar Pacotes" onclick="triggerBatchAction('ship')"><span class="material-icons" style="font-size:18px">local_shipping</span></div>
-        <div class="tool-btn" title="Filtrar" onclick="triggerBatchAction('filter')"><span class="material-icons" style="font-size:18px">filter_list</span></div>
-        <div class="tool-btn" title="Ordenar por Preço" onclick="triggerBatchAction('sort')"><span class="material-icons" style="font-size:18px">sort</span></div>
+        <div class="tool-btn" title="Favoritar (em breve)" onclick="triggerBatchAction('star')" aria-label="Favoritar — em breve"><span class="material-icons" style="font-size:18px">star_outline</span></div>
+        <div class="tool-btn" title="Sinalizar (em breve)" onclick="triggerBatchAction('flag')" aria-label="Sinalizar — em breve"><span class="material-icons" style="font-size:18px">flag</span></div>
+        <div class="tool-btn" title="E-mail / WhatsApp (em breve)" onclick="triggerBatchAction('email')" aria-label="E-mail — em breve"><span class="material-icons" style="font-size:18px">mail_outline</span></div>
+        <div class="tool-btn" title="Imprimir etiquetas (em breve)" onclick="triggerBatchAction('print')" aria-label="Imprimir etiquetas — em breve"><span class="material-icons" style="font-size:18px">print</span></div>
+        <div class="tool-btn" style="background:#0066FF; color:#FFF; border:none;" title="Despachar pacotes (em breve)" onclick="triggerBatchAction('ship')" aria-label="Despachar — em breve"><span class="material-icons" style="font-size:18px">local_shipping</span></div>
+        <div class="tool-btn" title="Filtro avançado (em breve)" onclick="triggerBatchAction('filter')" aria-label="Filtrar — em breve"><span class="material-icons" style="font-size:18px">filter_list</span></div>
+        <div class="tool-btn" title="Ordenar por preço (em breve)" onclick="triggerBatchAction('sort')" aria-label="Ordenar — em breve"><span class="material-icons" style="font-size:18px">sort</span></div>
       </div>
     </div>
 
@@ -324,11 +337,11 @@ async def get_web_ui():
           <div class="card" style="margin-bottom:20px; background:linear-gradient(90deg, rgba(37,99,235,0.15), rgba(6,182,212,0.1)); border-left:4px solid #0066FF;">
             <div style="display:flex; justify-content:space-between; align-items:center;">
               <div>
-                <strong style="color:#fff; font-size:1rem;">⚡ Painel Executivo BaseLucas (Dashboard de Gráficos)</strong>
-                <div style="font-size:0.8rem; color:var(--text-muted); margin-top:4px;">Indicadores de desempenho, volume diário de vendas e distribuição por fila do BaseLinker.</div>
+                <strong style="color:#fff; font-size:1rem;">Painel executivo Base Lucas</strong>
+                <div style="font-size:0.8rem; color:var(--text-muted); margin-top:4px;">Indicadores do cache local (Mercado Livre / SQLite) e distribuição por fila nativa.</div>
               </div>
-              <button class="btn-add-order" onclick="syncWithBaseLinkerAPI()">
-                <span class="material-icons">sync</span> Atualizar Filas BaseLinker
+              <button class="btn-add-order" onclick="syncWithBaseLinkerAPI()" title="Recarrega a página com o cache SQLite atual">
+                <span class="material-icons">sync</span> Recarregar cache local
               </button>
             </div>
           </div>
@@ -552,11 +565,11 @@ async def get_web_ui():
   <!-- Modal: Alterar Fila / Status -->
   <div class="modal-overlay" id="alter-fila-modal">
     <div class="modal-box">
-      <h3 style="margin-bottom:14px; font-weight:800;">🚩 Alterar Fila / Status do Pedido</h3>
-      <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:16px;">Selecione para qual Fila/Status do BaseLinker você deseja mover o(s) pedido(s):</p>
+      <h3 style="margin-bottom:14px; font-weight:800;">Alterar fila / status do pedido</h3>
+      <p style="font-size:0.85rem; color:var(--text-muted); margin-bottom:16px;">Escolha a fila nativa de destino. A alteração fica só nesta sessão até a API de pickup/filas persistir no SQLite — ao recarregar, o cache volta.</p>
       
       <div style="margin-bottom:16px;">
-        <label style="font-size:0.8rem; font-weight:700; color:var(--text-muted);">SELECIONAR NOVA FILA (60 STATUS):</label>
+        <label style="font-size:0.8rem; font-weight:700; color:var(--text-muted);">NOVA FILA (catálogo local):</label>
         <select id="new-status-select" style="width:100%; padding:10px; border-radius:6px; border:1px solid var(--border); background:var(--bg); color:var(--text); margin-top:6px; font-weight:700;">
           <!-- Rendered via JS -->
         </select>
@@ -731,7 +744,6 @@ async def get_web_ui():
     let OPERATORS = {operators_json};
 
     let activeStatusFilter = 'Todos os pedidos';
-    let activeChannelFilter = 'All';
     let globalSearchTerm = '';
     let selectedOrderIds = new Set();
 
@@ -749,12 +761,6 @@ async def get_web_ui():
       if (!term) return true;
       const fields = [order.id, order.external_id, order.customer, order.email, order.phone, order.item, order.sku, order.channel, order.status];
       return fields.some(f => f && String(f).toLowerCase().includes(term));
-    }}
-
-    function filterByChannel(channel) {{
-      activeChannelFilter = channel;
-      switchTab('orders');
-      renderOrdersTable();
     }}
 
     function openOrderModal(mode = 'NEW') {{
@@ -1090,8 +1096,7 @@ async def get_web_ui():
       
       let filtered = REAL_ORDERS.filter(o => {{
         if (activeStatusFilter !== 'Todos os pedidos' && o.status !== activeStatusFilter) return false;
-        if (activeChannelFilter && activeChannelFilter !== 'All' && o.channel !== activeChannelFilter) return false;
-        
+
         if (dateFrom) {{
           const dFrom = new Date(dateFrom + 'T00:00:00');
           const od = parseOrderDate(o.date);

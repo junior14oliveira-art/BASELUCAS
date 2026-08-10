@@ -8,7 +8,7 @@ from src.config import settings
 from src.presentation.routers import (
     dashboard, orders, products, marketplaces, assistant, web_ui, automation_rules,
     inventory_documents, shipments, crm, invoices, external_connect, mercadolivre, operators,
-    bling, webhooks,
+    bling, webhooks, expedition,
 )
 
 app = FastAPI(
@@ -51,6 +51,7 @@ app.include_router(mercadolivre.router, prefix=settings.API_V1_STR)
 app.include_router(operators.router, prefix=settings.API_V1_STR)
 app.include_router(operators.users_alias_router, prefix=settings.API_V1_STR)
 app.include_router(bling.router, prefix=settings.API_V1_STR)
+app.include_router(expedition.router, prefix=settings.API_V1_STR)
 # Etapa 3 — /webhooks/bling/nfe e /api/v1/webhooks/bling/nfe (paths absolutos no router)
 app.include_router(webhooks.router)
 
