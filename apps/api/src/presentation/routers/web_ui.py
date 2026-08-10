@@ -510,8 +510,83 @@ async def get_web_ui():
     let OPERATORS = {operators_json};
 
     let activeStatusFilter = 'Todos os pedidos';
+    let activeChannelFilter = 'All';
     let globalSearchTerm = '';
     let selectedOrderIds = new Set();
+
+    function parseOrderDate(dateStr) {{
+      if (!dateStr) return null;
+      const parts = dateStr.split(' ');
+      const dateParts = parts[0].split('/');
+      if (dateParts.length !== 3) return null;
+      const timeParts = (parts[1] || '00:00').split(':');
+      return new Date(parseInt(dateParts[2]), parseInt(dateParts[1]) - 1, parseInt(dateParts[0]), parseInt(timeParts[0] || 0), parseInt(timeParts[1] || 0));
+    }}
+
+    function searchMatch(order, qTerm) {{
+      const term = (qTerm || globalSearchTerm || '').toLowerCase().trim();
+      if (!term) return true;
+      const fields = [order.id, order.external_id, order.customer, order.email, order.phone, order.item, order.sku, order.channel, order.status];
+      return fields.some(f => f && String(f).toLowerCase().includes(term));
+    }}
+
+    function filterByChannel(channel) {{
+      activeChannelFilter = channel;
+      switchTab('orders');
+      renderOrdersTable();
+    }}
+
+    function openOrderModal(mode = 'NEW') {{
+      alert(`[BaseLucas] Adicionar / Editar pedido (${{mode}}).`);
+    }}
+
+    function triggerBatchAction(action) {{
+      if (action === 'select_all') {{
+        const cb = document.getElementById('select-all-checkbox');
+        if (cb) {{
+          cb.checked = !cb.checked;
+          toggleSelectAllOrders(cb.checked);
+        }}
+        return;
+      }}
+      const selCount = selectedOrderIds.size;
+      alert(`[BaseLucas] Ação em lote '${{action}}' executada para ${{selCount}} pedido(s) selecionado(s).`);
+    }}
+
+    function toggleSelectAllOrders(checked) {{
+      const filtered = applyFilters();
+      const tbody = document.getElementById('orders-table-body');
+      if (!tbody) return;
+      const cbs = tbody.querySelectorAll('input[type="checkbox"]');
+      cbs.forEach(cb => {{
+        cb.checked = checked;
+        if (checked) {{
+          selectedOrderIds.add(cb.value);
+        }} else {{
+          selectedOrderIds.delete(cb.value);
+        }}
+      }});
+      if (!checked && selectedOrderIds.size > 0) {{
+        selectedOrderIds.clear();
+      }}
+    }}
+
+    function toggleSelectOrder(orderId, checked) {{
+      if (checked) {{
+        selectedOrderIds.add(String(orderId));
+      }} else {{
+        selectedOrderIds.delete(String(orderId));
+      }}
+    }}
+
+    function updateOrdersCount() {{
+      const titleEl = document.getElementById('orders-title');
+      const tbody = document.getElementById('orders-table-body');
+      if (titleEl && tbody) {{
+        const count = tbody.querySelectorAll('tr').length;
+        titleEl.innerText = `Pedidos na Fila: ${{activeStatusFilter}} (${{count}})`;
+      }}
+    }}
 
     // Categorias Oficiais do BaseLucas
     const STATUS_GROUPS = [
@@ -721,8 +796,9 @@ async def get_web_ui():
               const cnt = counts[stObj.name] || 0;
               groupTotal += cnt;
               const active = activeStatusFilter === stObj.name ? 'active' : '';
+              const safeName = stObj.name.replace(/'/g, "\\'");
               groupItemsHtml += `
-                <div class="status-tree-item ${{active}}" onclick="filterByStatus('${{stObj.name}}', this)">
+                <div class="status-tree-item ${{active}}" onclick="filterByStatus('${{safeName}}', this)">
                   <span><strong style="color:#0066FF;">[${{stObj.id}}]</strong> ${{stObj.name}}</span> <span class="status-badge-count" style="background:${{stObj.color || '#64748B'}};">${{cnt}}</span>
                 </div>`;
             }}
@@ -744,8 +820,9 @@ async def get_web_ui():
         remaining.forEach(stObj => {{
           const cnt = counts[stObj.name] || 0;
           const active = activeStatusFilter === stObj.name ? 'active' : '';
+          const safeName = stObj.name.replace(/'/g, "\\'");
           html += `
-            <div class="status-tree-item ${{active}}" onclick="filterByStatus('${{stObj.name}}', this)">
+            <div class="status-tree-item ${{active}}" onclick="filterByStatus('${{safeName}}', this)">
               <span><strong style="color:#0066FF;">[${{stObj.id}}]</strong> ${{stObj.name}}</span> <span class="status-badge-count" style="background:${{stObj.color || '#64748B'}};">${{cnt}}</span>
             </div>`;
         }});
@@ -763,26 +840,27 @@ async def get_web_ui():
     }}
 
     function applyFilters() {{
-      const q = document.getElementById('search-input')?.value || '';
+      const qInput = document.getElementById('global-search');
+      const q = qInput ? qInput.value : (globalSearchTerm || '');
       const dateFrom = document.getElementById('filter-date-from')?.value;
       const dateTo = document.getElementById('filter-date-to')?.value;
       
       let filtered = REAL_ORDERS.filter(o => {{
         if (activeStatusFilter !== 'Todos os pedidos' && o.status !== activeStatusFilter) return false;
+        if (activeChannelFilter && activeChannelFilter !== 'All' && o.channel !== activeChannelFilter) return false;
         
         if (dateFrom) {{
-          const dFrom = new Date(dateFrom);
-          const od = new Date(o.created_at);
-          if (od < dFrom) return false;
+          const dFrom = new Date(dateFrom + 'T00:00:00');
+          const od = parseOrderDate(o.date);
+          if (od && od < dFrom) return false;
         }}
         if (dateTo) {{
-          const dTo = new Date(dateTo);
-          dTo.setHours(23, 59, 59);
-          const od = new Date(o.created_at);
-          if (od > dTo) return false;
+          const dTo = new Date(dateTo + 'T23:59:59');
+          const od = parseOrderDate(o.date);
+          if (od && od > dTo) return false;
         }}
         
-        return matchesSearch([o.id, o.external_id, o.customer, o.item, o.sku, o.channel, o.status]);
+        return matchesSearch([o.id, o.external_id, o.customer, o.email, o.phone, o.item, o.sku, o.channel, o.status]);
       }});
       
       return filtered;
@@ -803,7 +881,7 @@ async def get_web_ui():
 
       const rowsHtml = filtered.map(o => `
         <tr>
-          <td><input type="checkbox" value="${{o.id}}" onchange="toggleSelectOrder('${{o.id}}', this.checked)"></td>
+          <td><input type="checkbox" value="${{o.id}}" ${{selectedOrderIds.has(String(o.id)) ? 'checked' : ''}} onchange="toggleSelectOrder('${{o.id}}', this.checked)"></td>
           <td>
             <strong style="color:#38BDF8;">#${{o.id}}</strong><br>
             <span style="font-size:0.7rem; color:var(--text-muted);">${{o.external_id || 'Mercado Livre'}}</span>
@@ -834,18 +912,18 @@ async def get_web_ui():
       const filtered = applyFilters();
       if (filtered.length === 0) return alert("Nenhum pedido para baixar.");
       
-      let csv = "ID,NOME COMPRADOR,EMAIL,TELEFONE,STATUS,TOTAL,DATA\n";
+      let csv = "ID,NOME COMPRADOR,EMAIL,TELEFONE,STATUS,TOTAL,DATA\\n";
       filtered.forEach(o => {{
         const row = [
           o.id,
-          `"${{o.customer}}"`,
-          `""`, // no email in this UI struct
-          `""`, // no phone in this UI struct
-          `"${{o.status}}"`,
+          `"${{(o.customer || '').replace(/"/g, '""')}}"`,
+          `""`, 
+          `""`, 
+          `"${{(o.status || '').replace(/"/g, '""')}}"`,
           o.price,
-          `"${{o.date}}"`
+          `"${{(o.date || '').replace(/"/g, '""')}}"`
         ];
-        csv += row.join(",") + "\n";
+        csv += row.join(",") + "\\n";
       }});
       
       const blob = new Blob([csv], {{ type: 'text/csv;charset=utf-8;' }});
