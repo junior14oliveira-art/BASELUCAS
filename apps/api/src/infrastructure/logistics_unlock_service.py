@@ -40,6 +40,41 @@ from src.infrastructure.ml_sync_service import build_client as build_ml_client
 
 STATUS_AGUARDANDO_NOTA = "Aguardando Nota"
 STATUS_PRONTO_BIPAGEM = "Pronto para Bipagem"
+# Chave SEFAZ chegou, mas o ZPL ainda não — não prometer bipagem que vai falhar.
+STATUS_NOTA_RECEBIDA = "NF Recebida"
+
+# Filas fiscais: a trilha do sistema é dona delas e pode reposicionar o pedido.
+FISCAL_QUEUE_HINTS = (
+    "aguardando nota",
+    "aguardando nf",
+    "sem nota",
+    "nf recebida",
+    "aguardando faturamento",
+)
+
+_HOLD_REASONS = {
+    "em_producao": (
+        "Pedido está com um operador / em fila de montagem. Etiqueta engatilhada, "
+        "fila preservada — a expedição bipa quando a caixa chegar na bancada."
+    ),
+    "sem_zpl": (
+        "Chave da NF-e recebida, mas a etiqueta ZPL não veio (conta ML sem OAuth "
+        "ou download bloqueado). Ainda NÃO dá para bipar."
+    ),
+}
+
+# Filas do chão de fábrica: a trilha física é dona: a fiscal NÃO mexe.
+PRODUCTION_QUEUE_HINTS = (
+    "técnico",
+    "tecnico",
+    "técnica",
+    "tecnica",
+    "separação",
+    "separacao",
+    "montagem",
+    "embalagem",
+    "pacote",
+)
 
 _AUTHORIZED_HINTS = (
     "autorizada",
@@ -311,15 +346,29 @@ async def download_and_arm_zpl(order: RealOrderDB) -> Dict[str, Any]:
     }
 
 
+def is_in_production(order: RealOrderDB) -> bool:
+    """A caixa já está com alguém no chão de fábrica?
+
+    Premissa do pipeline assíncrono (docs/PIPELINE_ASSINCRONO.md): as duas
+    trilhas correm independentes. Se um operador puxou o pedido (Etapa 1) ou
+    ele está numa fila de montagem/separação, a trilha fiscal engatilha o ZPL
+    mas NÃO reposiciona a fila — quem manda ali é a trilha física.
+    """
+    if int(getattr(order, "picked_by_id", 0) or 0) > 0:
+        return True
+    low = (order.status_name or "").lower()
+    return any(hint in low for hint in PRODUCTION_QUEUE_HINTS)
+
+
 def _should_flip_status(current: str, unlock: bool) -> bool:
+    """Só reposiciona pedido que ainda está numa fila fiscal (ou sem fila)."""
     if not unlock:
         return False
     name = (current or "").strip()
     if not name or name == STATUS_AGUARDANDO_NOTA:
         return True
-    # Também libera se ainda estiver em filas fiscais típicas
     low = name.lower()
-    return "aguardando nota" in low or "aguardando nf" in low or "sem nota" in low
+    return any(hint in low for hint in FISCAL_QUEUE_HINTS)
 
 
 async def apply_order_unlock(
@@ -364,19 +413,29 @@ async def apply_order_unlock(
 
         prev_status = order.status_name
         unlocked = False
-        if armed or (
+        status_hold = ""
+
+        if is_in_production(order):
+            # A caixa está com um operador / numa fila de montagem. O ZPL fica
+            # engatilhado (acima), mas a fila é da trilha física — não mexer.
+            status_hold = "em_producao"
+        elif armed:
+            # Só com ZPL real na mão "Pronto para Bipagem" é promessa cumprível.
+            if _should_flip_status(order.status_name or "", True):
+                order.status_name = STATUS_PRONTO_BIPAGEM
+                unlocked = True
+        elif (
             settings.LOGISTICS_UNLOCK_ON_NFE_KEY
             and access_key
             and inj in ("ok", "gated_read_only")
         ):
-            if _should_flip_status(order.status_name or "", True):
-                order.status_name = STATUS_PRONTO_BIPAGEM
-                unlocked = True
-            elif armed and (order.status_name or "") != STATUS_PRONTO_BIPAGEM:
-                # Já saiu de Aguardando Nota mas ZPL acabou de chegar
-                if "bipagem" not in (order.status_name or "").lower():
-                    order.status_name = STATUS_PRONTO_BIPAGEM
-                    unlocked = True
+            # Chave SEFAZ ok, etiqueta ainda não (gate ML ou erro no GET).
+            # Marcar "Pronto para Bipagem" aqui faria a Etapa 4 devolver 409.
+            status_hold = "sem_zpl"
+            if _should_flip_status(order.status_name or "", True) and (
+                (order.status_name or "").strip() != STATUS_NOTA_RECEBIDA
+            ):
+                order.status_name = STATUS_NOTA_RECEBIDA
 
         # Espelha no enrichment para UI / expedition fallback
         try:
@@ -392,6 +451,7 @@ async def apply_order_unlock(
         enrich["zpl_path"] = order.zpl_path or ""
         enrich["ml_billing_inject_status"] = order.ml_billing_inject_status
         enrich["logistics_unlock_at"] = datetime.now().isoformat()
+        enrich["status_hold"] = status_hold
         order.enrichment_json = json.dumps(enrich, ensure_ascii=False)
 
         await session.commit()
@@ -402,6 +462,9 @@ async def apply_order_unlock(
             "previous_status": prev_status,
             "status_name": order.status_name,
             "status_unlocked": unlocked,
+            "status_hold": status_hold,
+            "status_hold_reason": _HOLD_REASONS.get(status_hold, ""),
+            "can_scan": bool(order.zpl_armed),
             "zpl_armed": bool(order.zpl_armed),
             "zpl_path": order.zpl_path or "",
             "zpl_status": order.zpl_status,

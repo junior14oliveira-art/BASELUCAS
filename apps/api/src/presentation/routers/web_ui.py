@@ -238,6 +238,9 @@ async def get_web_ui():
     <div class="rail-item" id="rail-products" title="Inventário & Produtos" onclick="switchTab('products', this)">
       <span class="material-icons">inventory_2</span>
     </div>
+    <div class="rail-item" id="rail-users" title="Usuários / Equipe" onclick="switchTab('users', this)">
+      <span class="material-icons">groups</span>
+    </div>
     <div class="rail-item" id="rail-expedition" title="Expedição — Bipagem & Etiquetas ZPL" onclick="switchTab('expedition', this)">
       <span class="material-icons">qr_code_scanner</span>
       <span class="rail-tag" style="background:#22a564; color:#FFF; font-size:0.55rem; margin-top:2px;">PACK</span>
@@ -270,7 +273,7 @@ async def get_web_ui():
           <span style="color:#0066FF;">Base</span> Lucas
         </div>
         <div class="top-readonly-badge">
-          <span class="material-icons" style="font-size:14px;">lock</span> Somente leitura — em construção
+          <span class="material-icons" style="font-size:14px;">lock</span> Cache local ML — leitura
         </div>
         <div class="search-pill">
           <span class="material-icons" style="color:var(--text-muted); font-size:18px;">search</span>
@@ -426,6 +429,7 @@ async def get_web_ui():
                   <th>PREÇO</th>
                   <th>INFORMAÇÕES ADICIONAIS (fila / envio)</th>
                   <th>DATA DO PEDIDO (em status)</th>
+                  <th>AÇÕES</th>
                 </tr>
               </thead>
               <tbody id="orders-table-body">
@@ -1040,7 +1044,7 @@ async def get_web_ui():
     function createOperator() {{
       const name = document.getElementById('new-op-name').value.trim();
       const role = document.getElementById('new-op-role').value.trim() || 'Técnico';
-      if (!name) return alert('Digite o nome do operador');
+      if (!name) {{ _toast('Digite o nome do operador.', 'info'); return; }}
 
       fetch('/api/v1/operators', {{
         method: 'POST',
@@ -1053,12 +1057,13 @@ async def get_web_ui():
         renderOperatorsDropdown();
         document.getElementById('new-op-name').value = '';
         document.getElementById('new-op-role').value = '';
-        alert(`Operador ${{newOp.name}} cadastrado com sucesso!`);
-      }});
+        _toast('Operador ' + newOp.name + ' cadastrado.', 'success');
+      }})
+      .catch(e => _toast('Não foi possível cadastrar: ' + (e.message || e), 'error'));
     }}
 
     function deleteOperator(opId) {{
-      if (!confirm(`Deseja excluir o operador #${{opId}}?`)) return;
+      if (!(window.AppUx && AppUx.confirmDestructive ? AppUx.confirmDestructive('Excluir o operador #' + opId + '? Esta ação não pode ser desfeita.') : confirm('Excluir o operador #' + opId + '?'))) return;
       fetch(`/api/v1/operators/${{opId}}`, {{ method: 'DELETE' }})
       .then(() => {{
         OPERATORS = OPERATORS.filter(o => o.id !== opId);
@@ -1272,6 +1277,15 @@ async def get_web_ui():
         </tr>
       `).join('');
 
+      if (!filtered.length) {{
+        const hint = (globalSearchTerm || activeStatusFilter !== 'Todos os pedidos')
+          ? (window.AppUx && AppUx.CLEAR_FILTER_TIP) || 'Ajuste a busca ou a fila na barra lateral.'
+          : 'Sincronize pedidos do Mercado Livre ou recarregue o cache local.';
+        tbody.innerHTML = (window.AppUx && AppUx.emptyTableRowHtml)
+          ? AppUx.emptyTableRowHtml(7, 'Nenhum pedido nesta visão.', hint)
+          : '<tr><td colspan="7" style="text-align:center;padding:24px;color:#94A3B8;">Nenhum pedido nesta visão.</td></tr>';
+        return;
+      }}
       tbody.innerHTML = rowsHtml;
     }}
 
@@ -1280,7 +1294,10 @@ async def get_web_ui():
 
     function downloadExcel() {{
       const filtered = applyFilters();
-      if (filtered.length === 0) return alert("Nenhum pedido para baixar.");
+      if (filtered.length === 0) {{
+        _toast('Nenhum pedido para baixar com os filtros atuais.', 'info');
+        return;
+      }}
       
       let csv = "ID,NOME COMPRADOR,EMAIL,TELEFONE,STATUS,TOTAL,DATA\\n";
       filtered.forEach(o => {{
@@ -1388,7 +1405,7 @@ async def get_web_ui():
             <code style="background:rgba(0,102,255,0.15); color:#38BDF8; border:1px solid rgba(0,102,255,0.3); padding:3px 8px; border-radius:6px; font-weight:700; font-size:0.8rem;">${{p.sku || p.id}}</code><br>
             <span style="font-size:0.72rem; color:#94A3B8; display:flex; align-items:center; gap:4px; margin-top:4px;">
               <span>EAN: <strong>${{p.ean}}</strong></span>
-              <button onclick="navigator.clipboard.writeText('${{p.ean}}'); alert('EAN copiado!');" style="background:none; border:none; color:#38BDF8; cursor:pointer; font-size:0.7rem; padding:0;">📋</button>
+              <button type="button" onclick="navigator.clipboard.writeText('${{p.ean}}').then(() => _toast('EAN copiado.', 'success')).catch(() => _toast('Não foi possível copiar o EAN.', 'error'));" style="background:none; border:none; color:#38BDF8; cursor:pointer; font-size:0.7rem; padding:0;" title="Copiar EAN" aria-label="Copiar EAN">📋</button>
             </span>
           </td>
           <td style="vertical-align:middle;">
@@ -1431,24 +1448,32 @@ async def get_web_ui():
       const select = document.getElementById('new-status-select');
       const selectedStatusId = parseInt(select.value);
       const stObj = REAL_STATUSES.find(s => s.id === selectedStatusId);
-      if (!stObj) return;
-
-      if (selectedOrderIds.size === 0 && REAL_ORDERS.length > 0) {{
-        selectedOrderIds.add(REAL_ORDERS[0].id);
+      if (!stObj) {{
+        _toast('Selecione uma fila de destino.', 'info');
+        return;
+      }}
+      if (selectedOrderIds.size === 0) {{
+        _toast('Selecione ao menos um pedido na tabela antes de alterar a fila.', 'info');
+        return;
       }}
 
+      let moved = 0;
       selectedOrderIds.forEach(id => {{
-        const order = REAL_ORDERS.find(o => o.id === id);
+        const order = REAL_ORDERS.find(o => o.id === id || String(o.id) === String(id));
         if (order) {{
           order.status_id = stObj.id;
           order.status = stObj.name;
+          moved++;
         }}
       }});
 
-      alert(`🚩 Fila alterada com sucesso para: '${{stObj.name}}' (#${{stObj.id}})`);
       closeAlterFilaModal();
       renderOrdersTable();
       renderCategorizedSidebar();
+      _toast(
+        moved + ' pedido(s) movido(s) para "' + stObj.name + '" só nesta sessão. Recarregar a página restaura o cache SQLite até a API persistir a fila.',
+        'warning'
+      );
     }}
 
     function openOperatorModal() {{
@@ -1657,6 +1682,66 @@ async def get_web_ui():
         if (redirectUri.trim()) body.redirect_uri = redirectUri.trim();
         const res = await fetch('/api/v1/ml/credentials', {{
           method: 'POST',
+          headers: {{ 'Content-Type': 'application/json' }},
+          body: JSON.stringify(body)
+        }});
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || data.message || 'Falha ao salvar');
+        _toast(data.message || 'Credenciais ML salvas.', 'success');
+        await refreshMlDirectCardStatus();
+      }} catch (e) {{
+        _toast('Erro ML: ' + (e.message || e), 'error');
+      }}
+    }}
+
+    async function startMlDirectOAuth() {{
+      try {{
+        const res = await fetch('/api/v1/ml/auth/url');
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || data.message || 'Falha ao gerar URL OAuth');
+        if (!data.authorization_url) throw new Error('URL de autorização ausente');
+        window.location.href = data.authorization_url;
+      }} catch (e) {{
+        _toast('OAuth ML: ' + (e.message || e), 'error');
+      }}
+    }}
+
+    // Init UI on load
+    try {{
+      const savedStatus = localStorage.getItem('active_status_filter');
+      if (savedStatus) activeStatusFilter = savedStatus;
+    }} catch(e) {{}}
+
+    renderOperatorsDropdown();
+    renderCategorizedSidebar();
+    renderOrdersTable();
+
+    let initialTab = 'orders';
+    try {{
+      initialTab = localStorage.getItem('active_tab') || 'orders';
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('tab')) initialTab = params.get('tab');
+      if (params.get('bling') === 'ok') {{
+        initialTab = 'marketplaces';
+        setTimeout(() => _toast('Bling OAuth concluído — tokens salvos.', 'success'), 400);
+      }}
+      if (params.get('bling_error')) {{
+        initialTab = 'marketplaces';
+        setTimeout(() => _toast('Erro Bling OAuth: ' + params.get('bling_error'), 'error'), 400);
+      }}
+    }} catch(e) {{}}
+    switchTab(initialTab);
+    refreshBlingCardStatus();
+    refreshMlDirectCardStatus();
+
+    setTimeout(initCharts, 100);
+  </script>
+</body>
+</html>
+
+"""
+    return HTMLResponse(content=html_template)
+      method: 'POST',
           headers: {{ 'Content-Type': 'application/json' }},
           body: JSON.stringify(body)
         }});
