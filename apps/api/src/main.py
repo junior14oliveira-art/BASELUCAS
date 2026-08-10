@@ -55,6 +55,26 @@ app.include_router(expedition.router, prefix=settings.API_V1_STR)
 # Etapa 3 — /webhooks/bling/nfe e /api/v1/webhooks/bling/nfe (paths absolutos no router)
 app.include_router(webhooks.router)
 
+import asyncio
+import logging
+from src.infrastructure.ml_sync_service import ml_sync_service, get_account
+
+async def auto_sync_ml_task():
+    """Background task que roda a cada 5 minutos sincronizando o ML nativo."""
+    while True:
+        await asyncio.sleep(300)  # Aguarda 5 minutos
+        try:
+            account = await get_account(None)
+            if account and account.access_token:
+                logging.info(f"Iniciando Auto-Sync ML em background para: {account.nickname}")
+                await ml_sync_service.sync_all(account)
+        except Exception as e:
+            logging.error(f"Erro no Auto-Sync ML: {e}")
+
+@app.on_event("startup")
+async def on_startup():
+    asyncio.create_task(auto_sync_ml_task())
+
 
 @app.get("/api-status")
 async def api_status():
