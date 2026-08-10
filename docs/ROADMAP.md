@@ -48,12 +48,12 @@ Esta etapa automatiza a burocracia chata e tira o ser humano do processo de emit
 ---
 
 ## 🎯 ETAPA 3: O Gatilho da Logística (Webhooks e ZPL)
-**Status:** 🔴 Não Iniciado (Foco 4)
+**Status:** 🟢 Implementado (Foco 4)
 
 Aqui é onde o sistema "ouve" o Bling e busca a etiqueta no Mercado Livre.
-- [ ] Configurar o **Webhook do Bling** no nosso FastAPI (uma rota `POST /webhooks/bling/nfe`) para o Bling nos avisar assim que a Sefaz aprovar a nota.
-- [ ] Ao receber a Chave de Acesso no webhook, o sistema injeta a chave automaticamente na API do Mercado Livre (`/billing_info`).
-- [ ] O sistema baixa a etiqueta **ZPL** (Mercado Envios) em background e a deixa engatilhada, mudando o status daquela caixa de "Aguardando Nota" para "Pronto para Bipagem".
+- [x] Configurar o **Webhook do Bling** no nosso FastAPI (uma rota `POST /webhooks/bling/nfe`) para o Bling nos avisar assim que a Sefaz aprovar a nota.
+- [x] Ao receber a Chave de Acesso no webhook, o sistema injeta a chave automaticamente na API do Mercado Livre (`/billing_info`) — **gated** com `ML_READ_ONLY=true` (stub documentado em `docs/LABELS_ML.md`).
+- [x] O sistema baixa a etiqueta **ZPL** (Mercado Envios) em background e a deixa engatilhada (`zpl_armed` / `zpl_content` / `data/zpl_labels/`), mudando o status daquela caixa de "Aguardando Nota" para "Pronto para Bipagem".
 
 ---
 
