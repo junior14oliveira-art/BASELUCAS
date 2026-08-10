@@ -807,7 +807,7 @@
       </div>
       <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:12px;">
         Cadastre o app em <strong style="color:#F59E0B;">developer.bling.com.br</strong>.
-        Redirect URI: <code style="color:#38BDF8;">http://localhost:8000/api/v1/bling/callback</code>
+        Redirect URI: <code id="bling-redirect-uri" style="color:#38BDF8;">http://localhost:3000/api/v1/base/bling/callback</code>
       </p>
       <p id="bling-modal-status" style="font-size:0.78rem; color:var(--amber); margin-bottom:14px;">Status: —</p>
 
@@ -2089,6 +2089,7 @@
     async function refreshBlingCardStatus() {
       const el = document.getElementById('bling-card-status');
       const modalStatus = document.getElementById('bling-modal-status');
+      const redirectEl = document.getElementById('bling-redirect-uri');
       try {
         const res = await fetch((API_BASE + '/api/v1/base/bling/status'));
         const data = await res.json();
@@ -2101,6 +2102,9 @@
         if (modalStatus) {
           modalStatus.style.color = color;
           modalStatus.innerText = 'Status: ' + label + (data.client_id_masked ? ' · App ' + data.client_id_masked : '');
+        }
+        if (redirectEl && data.redirect_uri) {
+          redirectEl.textContent = data.redirect_uri;
         }
         return data;
       } catch (e) {
@@ -2164,8 +2168,13 @@
       }
     }
 
-    function startBlingOAuth() {
-      window.location.href = (API_BASE + '/api/v1/base/bling/auth?redirect=true');
+    async function startBlingOAuth() {
+      try {
+        // redirect=true faz o backend responder 302 para o authorize do Bling.
+        window.location.href = API_BASE + '/api/v1/base/bling/auth?redirect=true';
+      } catch (e) {
+        _toast('Erro ao iniciar OAuth Bling: ' + (e.message || e), 'error');
+      }
     }
 
     async function testBlingConnection() {

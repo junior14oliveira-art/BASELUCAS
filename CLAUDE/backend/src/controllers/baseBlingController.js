@@ -1,18 +1,26 @@
 /**
  * Módulo 4 — Macro Fiscal & Bling ERP (Etapa 2).
- * Origem: apps/api/src/presentation/routers/bling.py
+ * Porte fiel de apps/api/src/presentation/routers/bling.py + bling_client.py
+ * Documentação: docs/BLING_API_STUDY.md + developer.bling.com.br
  *
- * Trava de segurança portada do Python: BLING_READ_ONLY=true (default) recusa
- * qualquer POST que crie pedido ou emita NF-e. Só liberar após homologação.
+ * Hosts oficiais (API v3):
+ *   API    → https://api.bling.com.br/Api/v3
+ *   OAuth  → https://www.bling.com.br/Api/v3/oauth
+ *
+ * Flags: BLING_READ_ONLY=true e NFE_EMIT_ENABLED=false (defaults seguros).
  */
 
+const crypto = require("crypto");
 const axios = require("axios");
 const db = require("../config/database");
 const pedidos = require("../services/ordersRepository");
 
-const BLING_AUTH = "https://www.bling.com.br/Api/v3/oauth/authorize";
-const BLING_TOKEN = "https://www.bling.com.br/Api/v3/oauth/token";
-const BLING_API = "https://www.bling.com.br/Api/v3";
+const BLING_API_BASE = (
+  process.env.BLING_API_BASE_URL || "https://api.bling.com.br/Api/v3"
+).replace(/\/$/, "");
+const BLING_OAUTH_BASE = (
+  process.env.BLING_AUTH_BASE_URL || "https://www.bling.com.br/Api/v3/oauth"
+).replace(/\/$/, "");
 
 const somenteLeitura = () =>
   String(process.env.BLING_READ_ONLY ?? "true").toLowerCase() !== "false";
@@ -20,6 +28,55 @@ const emissaoLiberada = () =>
   String(process.env.NFE_EMIT_ENABLED ?? "false").toLowerCase() === "true";
 
 const agora = () => new Date().toISOString();
+const accountKeyPadrao = (override) =>
+  String(override || process.env.BLING_ACCOUNT_KEY || "default").trim() || "default";
+
+function redirectUri() {
+  const fromEnv = String(process.env.BLING_REDIRECT_URI || "").trim();
+  if (fromEnv) return fromEnv;
+  const port = Number(process.env.PORT || 3000);
+  return `http://localhost:${port}/api/v1/base/bling/callback`;
+}
+
+function mask(value, keep = 6) {
+  const v = String(value || "").trim();
+  if (!v) return "";
+  if (v.length <= keep) return "*".repeat(v.length);
+  return `${"*".repeat(Math.max(v.length - keep, 4))}${v.slice(-keep)}`;
+}
+
+/** Rate limit simples: máx. ~3 req/s (intervalo mínimo 350ms). */
+let _lastBlingCall = 0;
+async function rateLimit() {
+  const minInterval = 350;
+  const agoraMs = Date.now();
+  const espera = minInterval - (agoraMs - _lastBlingCall);
+  if (espera > 0) await new Promise((r) => setTimeout(r, espera));
+  _lastBlingCall = Date.now();
+}
+
+async function blingGet(path, token) {
+  await rateLimit();
+  return axios.get(`${BLING_API_BASE}${path}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+    },
+    timeout: 30000,
+  });
+}
+
+async function blingPost(path, token, body) {
+  await rateLimit();
+  return axios.post(`${BLING_API_BASE}${path}`, body, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    timeout: 45000,
+  });
+}
 
 async function garantirTabela() {
   const mysql = db.isMysql();
@@ -38,21 +95,34 @@ async function garantirTabela() {
   `);
 }
 
-async function carregarConfig(accountKey = "default") {
+function resolveCredentials(cfg) {
+  const client_id = String(
+    cfg?.client_id || process.env.BLING_CLIENT_ID || ""
+  ).trim();
+  const client_secret = String(
+    cfg?.client_secret || process.env.BLING_CLIENT_SECRET || ""
+  ).trim();
+  return { client_id, client_secret };
+}
+
+async function carregarConfig(accountKey) {
   await garantirTabela();
-  return db.get("SELECT * FROM base_bling_config WHERE account_key = ?", [accountKey]);
+  return db.get("SELECT * FROM base_bling_config WHERE account_key = ?", [
+    accountKeyPadrao(accountKey),
+  ]);
 }
 
 async function salvarConfig(accountKey, campos) {
   await garantirTabela();
-  const atual = await carregarConfig(accountKey);
+  const key = accountKeyPadrao(accountKey);
+  const atual = await carregarConfig(key);
   if (!atual) {
     await db.execute(
       `INSERT INTO base_bling_config
          (account_key, client_id, client_secret, access_token, refresh_token, expires_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)`,
       [
-        accountKey,
+        key,
         campos.client_id || "",
         campos.client_secret || "",
         campos.access_token || "",
@@ -61,7 +131,7 @@ async function salvarConfig(accountKey, campos) {
         agora(),
       ]
     );
-    return carregarConfig(accountKey);
+    return carregarConfig(key);
   }
   const merge = { ...atual, ...campos };
   await db.execute(
@@ -76,25 +146,84 @@ async function salvarConfig(accountKey, campos) {
       merge.refresh_token || "",
       merge.expires_at || 0,
       agora(),
-      accountKey,
+      key,
     ]
   );
-  return carregarConfig(accountKey);
+  return carregarConfig(key);
 }
 
-/** Renova o access_token quando faltam menos de 5 min de validade. */
-async function tokenValido(accountKey = "default") {
-  const cfg = await carregarConfig(accountKey);
+function statusPayload(cfg) {
+  const { client_id, client_secret } = resolveCredentials(cfg);
+  const appOk = Boolean(client_id && client_secret);
+  const hasToken = Boolean(String(cfg?.access_token || "").trim());
+  const expira = Number(cfg?.expires_at || 0);
+  const tokenExpired = Boolean(expira && Date.now() / 1000 >= expira);
+
+  let ui_status = "not_configured";
+  let ui_label = "Não configurado — clique para informar Client ID / Secret";
+  let ui_color = "muted";
+
+  if (hasToken && !tokenExpired) {
+    ui_status = "configured";
+    ui_label = somenteLeitura()
+      ? "Configurado (somente leitura — NF-e aguarda homologação)"
+      : "Configurado (token ativo — NF-e aguarda homologação)";
+    ui_color = "amber";
+  } else if (hasToken && tokenExpired) {
+    ui_status = "awaiting_credentials";
+    ui_label = "Token expirado — reconecte OAuth ou cole novo token";
+    ui_color = "amber";
+  } else if (appOk) {
+    ui_status = "awaiting_credentials";
+    ui_label = "App configurado — conclua OAuth ou cole o access token";
+    ui_color = "amber";
+  }
+
+  return {
+    ok: true,
+    configured: appOk,
+    connected: hasToken && !tokenExpired,
+    app_configured: appOk,
+    has_access_token: hasToken,
+    token_expired: tokenExpired,
+    account_key: cfg?.account_key || accountKeyPadrao(),
+    expires_at: expira,
+    read_only: somenteLeitura(),
+    bling_read_only: somenteLeitura(),
+    nfe_emit_enabled: emissaoLiberada(),
+    client_id_masked: mask(client_id, 6),
+    has_client_secret: Boolean(client_secret),
+    redirect_uri: redirectUri(),
+    ui_status,
+    ui_label,
+    ui_color,
+    auth_url: "/api/v1/base/bling/auth?redirect=true",
+    hint: !appOk
+      ? "Informe client_id e client_secret em POST /base/bling/credentials"
+      : !hasToken
+      ? "Autorize a conta em GET /base/bling/auth?redirect=true"
+      : null,
+  };
+}
+
+/** Renova o access_token quando faltam menos de 2 min de validade. */
+async function tokenValido(accountKey) {
+  const key = accountKeyPadrao(accountKey);
+  const cfg = await carregarConfig(key);
   if (!cfg || !cfg.access_token) return null;
 
   const expira = Number(cfg.expires_at || 0);
-  if (expira && Date.now() / 1000 < expira - 300) return cfg.access_token;
+  if (expira && Date.now() / 1000 < expira - 120) return cfg.access_token;
   if (!cfg.refresh_token) return cfg.access_token;
 
+  const { client_id, client_secret } = resolveCredentials(cfg);
+  if (!client_id || !client_secret) return cfg.access_token;
+
   try {
-    const basic = Buffer.from(`${cfg.client_id}:${cfg.client_secret}`).toString("base64");
+    await rateLimit();
+    const basic = Buffer.from(`${client_id}:${client_secret}`).toString("base64");
     const { data } = await axios.post(
-      BLING_TOKEN,
+      `${BLING_OAUTH_BASE}/token`,
       new URLSearchParams({
         grant_type: "refresh_token",
         refresh_token: cfg.refresh_token,
@@ -103,11 +232,12 @@ async function tokenValido(accountKey = "default") {
         headers: {
           Authorization: `Basic ${basic}`,
           "Content-Type": "application/x-www-form-urlencoded",
+          Accept: "application/json",
         },
         timeout: 30000,
       }
     );
-    await salvarConfig(accountKey, {
+    await salvarConfig(key, {
       access_token: data.access_token,
       refresh_token: data.refresh_token || cfg.refresh_token,
       expires_at: Math.floor(Date.now() / 1000) + Number(data.expires_in || 21600),
@@ -122,20 +252,8 @@ async function tokenValido(accountKey = "default") {
 /** GET /api/v1/base/bling/status */
 async function status(req, res) {
   try {
-    const cfg = await carregarConfig(String(req.query.account_key || "default"));
-    res.json({
-      configured: Boolean(cfg?.client_id && cfg?.client_secret),
-      connected: Boolean(cfg?.access_token),
-      account_key: cfg?.account_key || "default",
-      expires_at: Number(cfg?.expires_at || 0),
-      read_only: somenteLeitura(),
-      nfe_emit_enabled: emissaoLiberada(),
-      hint: !cfg?.client_id
-        ? "Informe client_id e client_secret em POST /base/bling/credentials"
-        : !cfg?.access_token
-        ? "Autorize a conta em GET /base/bling/auth"
-        : null,
-    });
+    const cfg = await carregarConfig(req.query.account_key);
+    res.json(statusPayload(cfg));
   } catch (err) {
     res.status(500).json({ error: "Falha no status Bling", detail: err.message });
   }
@@ -148,12 +266,17 @@ async function saveCredentials(req, res) {
     if (!client_id || !client_secret) {
       return res.status(400).json({ error: "client_id e client_secret são obrigatórios." });
     }
-    const cfg = await salvarConfig(String(account_key || "default"), {
-      client_id,
-      client_secret,
+    const cfg = await salvarConfig(account_key, {
+      client_id: String(client_id).trim(),
+      client_secret: String(client_secret).trim(),
     });
-    // Nunca devolver o secret ao cliente.
-    res.json({ ok: true, account_key: cfg.account_key, configured: true });
+    res.json({
+      ok: true,
+      message: "Credenciais do app Bling salvas. Conclua o OAuth ou cole o access token.",
+      account_key: cfg.account_key,
+      configured: true,
+      status: statusPayload(cfg),
+    });
   } catch (err) {
     res.status(500).json({ error: "Falha ao salvar credenciais", detail: err.message });
   }
@@ -164,40 +287,71 @@ async function saveTokens(req, res) {
   try {
     const { access_token, refresh_token, expires_in, account_key } = req.body || {};
     if (!access_token) return res.status(400).json({ error: "access_token é obrigatório." });
-    const cfg = await salvarConfig(String(account_key || "default"), {
-      access_token,
-      refresh_token: refresh_token || "",
+    const cfg = await salvarConfig(account_key, {
+      access_token: String(access_token).trim(),
+      refresh_token: String(refresh_token || "").trim(),
       expires_at: Math.floor(Date.now() / 1000) + Number(expires_in || 21600),
     });
-    res.json({ ok: true, account_key: cfg.account_key, connected: true });
+    res.json({
+      ok: true,
+      message: "Tokens Bling salvos.",
+      account_key: cfg.account_key,
+      connected: true,
+      status: statusPayload(cfg),
+    });
   } catch (err) {
     res.status(500).json({ error: "Falha ao salvar tokens", detail: err.message });
   }
 }
 
-/** POST /api/v1/base/bling/test — valida o token contra a API do Bling. */
+/** POST /api/v1/base/bling/test — valida o token (GET /empresas/meus-dados). */
 async function testConnection(req, res) {
   try {
-    const token = await tokenValido(String(req.query.account_key || "default"));
-    if (!token) return res.status(412).json({ ok: false, error: "Conta Bling não conectada." });
+    const key = accountKeyPadrao(req.query.account_key);
+    const token = await tokenValido(key);
+    if (!token) {
+      return res.status(412).json({
+        ok: false,
+        error: "Sem access_token — salve tokens ou conclua OAuth.",
+      });
+    }
 
-    const { data } = await axios.get(`${BLING_API}/situacoes/modulos`, {
-      headers: { Authorization: `Bearer ${token}` },
-      timeout: 30000,
-    });
+    let data;
+    let endpoint = "/empresas/meus-dados";
+    try {
+      ({ data } = await blingGet(endpoint, token));
+    } catch (err) {
+      // Fallback leve para escopos sem empresas
+      if (err.response?.status === 403 || err.response?.status === 404) {
+        endpoint = "/situacoes/modulos";
+        ({ data } = await blingGet(endpoint, token));
+      } else {
+        throw err;
+      }
+    }
+
+    const cfg = await carregarConfig(key);
     res.json({
       ok: true,
-      message: "Conexão com o Bling respondendo.",
-      modulos: Array.isArray(data?.data) ? data.data.length : undefined,
+      message: `Token Bling válido (leitura via ${endpoint}).`,
+      endpoint,
+      empresa: endpoint === "/empresas/meus-dados" ? data?.data || data : undefined,
+      modulos:
+        endpoint === "/situacoes/modulos" && Array.isArray(data?.data)
+          ? data.data.length
+          : undefined,
+      status: statusPayload(cfg),
+      note: "Status UI permanece 'Configurado' até emissão NF-e homologada.",
     });
   } catch (err) {
     const http = err.response?.status;
-    res.status(502).json({
+    res.status(http === 401 ? 401 : 502).json({
       ok: false,
       error:
         http === 401
           ? "Token do Bling recusado (401). Refaça a autorização OAuth."
           : `Bling não respondeu${http ? ` (HTTP ${http})` : ""}: ${err.message}`,
+      detail: err.response?.data,
     });
   }
 }
@@ -205,72 +359,128 @@ async function testConnection(req, res) {
 /** DELETE /api/v1/base/bling/connection — desconecta sem apagar as credenciais. */
 async function clearConnection(req, res) {
   try {
-    const accountKey = String(req.query.account_key || "default");
-    const cfg = await carregarConfig(accountKey);
+    const key = accountKeyPadrao(req.query.account_key);
+    const cfg = await carregarConfig(key);
     if (!cfg) return res.status(404).json({ error: "Conta não encontrada." });
-    await salvarConfig(accountKey, { access_token: "", refresh_token: "", expires_at: 0 });
+    const clearApp = String(req.query.clear_app || "").toLowerCase() === "true";
+    const campos = { access_token: "", refresh_token: "", expires_at: 0 };
+    if (clearApp) {
+      campos.client_id = "";
+      campos.client_secret = "";
+    }
+    const atualizado = await salvarConfig(key, campos);
     res.json({
       ok: true,
-      message: "Conexão Bling encerrada. Client ID/Secret preservados.",
+      message: clearApp
+        ? "Conexão e credenciais do app Bling removidas."
+        : "Conexão Bling encerrada. Client ID/Secret preservados.",
+      status: statusPayload(atualizado),
     });
   } catch (err) {
     res.status(500).json({ error: "Falha ao desconectar", detail: err.message });
   }
 }
 
-/** GET /api/v1/base/bling/auth — monta a URL de autorização OAuth v3. */
+function buildAuthorizeUrl({ clientId, state }) {
+  const params = new URLSearchParams({
+    response_type: "code",
+    client_id: clientId,
+    state,
+  });
+  const uri = redirectUri();
+  if (uri) params.set("redirect_uri", uri);
+  return `${BLING_OAUTH_BASE}/authorize?${params.toString()}`;
+}
+
+/** GET /api/v1/base/bling/auth — monta URL OAuth; ?redirect=true redireciona. */
 async function authStart(req, res) {
   try {
-    const accountKey = String(req.query.account_key || "default");
-    const cfg = await carregarConfig(accountKey);
-    if (!cfg?.client_id) {
-      return res.status(412).json({ error: "Configure client_id/client_secret antes." });
+    const key = accountKeyPadrao(req.query.account_key);
+    const cfg = await carregarConfig(key);
+    const { client_id, client_secret } = resolveCredentials(cfg);
+    if (!client_id || !client_secret) {
+      return res.status(412).json({
+        error: "Informe Client ID e Client Secret no card Bling antes do OAuth.",
+        ui_status: "awaiting_credentials",
+      });
     }
-    const state = `${accountKey}:${Math.random().toString(36).slice(2, 12)}`;
-    const url =
-      `${BLING_AUTH}?response_type=code` +
-      `&client_id=${encodeURIComponent(cfg.client_id)}` +
-      `&state=${encodeURIComponent(state)}`;
-    res.json({ authorization_url: url, state });
+
+    const state = `${key}:${crypto.randomBytes(16).toString("hex")}`;
+    const url = buildAuthorizeUrl({ clientId: client_id, state });
+    const wantRedirect =
+      String(req.query.redirect ?? "true").toLowerCase() !== "false";
+
+    if (wantRedirect) {
+      return res.redirect(302, url);
+    }
+    res.json({
+      authorization_url: url,
+      authorize_url: url,
+      state,
+      redirect_uri: redirectUri(),
+    });
   } catch (err) {
     res.status(500).json({ error: "Falha ao montar URL OAuth", detail: err.message });
   }
 }
 
-/** GET /api/v1/base/bling/callback — troca o code por tokens. */
+function redirectApp(res, query) {
+  return res.redirect(302, `/app?tab=marketplaces&${query}`);
+}
+
+/** GET /api/v1/base/bling/callback — troca code por tokens e volta à UI. */
 async function authCallback(req, res) {
+  const { code, state, error, error_description: errorDescription } = req.query;
+
+  if (error) {
+    const msg = encodeURIComponent(String(errorDescription || error).slice(0, 180));
+    return redirectApp(res, `bling_error=${msg}`);
+  }
+  if (!code) {
+    return redirectApp(res, "bling_error=missing_code");
+  }
+
   try {
-    const { code, state } = req.query;
-    if (!code) return res.status(400).json({ error: "code ausente no callback." });
+    const key = accountKeyPadrao(String(state || "default").split(":")[0]);
+    const cfg = await carregarConfig(key);
+    const { client_id, client_secret } = resolveCredentials(cfg);
+    if (!client_id || !client_secret) {
+      return redirectApp(res, "bling_error=app_not_configured");
+    }
 
-    const accountKey = String(state || "default").split(":")[0] || "default";
-    const cfg = await carregarConfig(accountKey);
-    if (!cfg?.client_id) return res.status(412).json({ error: "Credenciais não configuradas." });
+    await rateLimit();
+    const basic = Buffer.from(`${client_id}:${client_secret}`).toString("base64");
+    const body = new URLSearchParams({
+      grant_type: "authorization_code",
+      code: String(code),
+    });
+    const uri = redirectUri();
+    if (uri) body.set("redirect_uri", uri);
 
-    const basic = Buffer.from(`${cfg.client_id}:${cfg.client_secret}`).toString("base64");
-    const { data } = await axios.post(
-      BLING_TOKEN,
-      new URLSearchParams({ grant_type: "authorization_code", code: String(code) }).toString(),
-      {
-        headers: {
-          Authorization: `Basic ${basic}`,
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        timeout: 30000,
-      }
-    );
+    const { data } = await axios.post(`${BLING_OAUTH_BASE}/token`, body.toString(), {
+      headers: {
+        Authorization: `Basic ${basic}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+        Accept: "application/json",
+      },
+      timeout: 30000,
+    });
 
-    await salvarConfig(accountKey, {
+    if (!data?.access_token) {
+      return redirectApp(res, "bling_error=no_access_token");
+    }
+
+    await salvarConfig(key, {
+      client_id,
+      client_secret,
       access_token: data.access_token,
-      refresh_token: data.refresh_token,
+      refresh_token: data.refresh_token || "",
       expires_at: Math.floor(Date.now() / 1000) + Number(data.expires_in || 21600),
     });
-    res.json({ ok: true, message: `Conta Bling '${accountKey}' conectada.` });
+    return redirectApp(res, "bling=ok");
   } catch (err) {
-    res.status(502).json({
-      error: "Falha na troca de token",
-      detail: err.response?.data || err.message,
-    });
+    const detail = err.response?.data?.error?.description || err.message || "token_exchange_failed";
+    return redirectApp(res, `bling_error=${encodeURIComponent(String(detail).slice(0, 180))}`);
   }
 }
 
@@ -311,10 +521,7 @@ async function pushOrder(req, res) {
     const token = await tokenValido();
     if (!token) return res.status(412).json({ error: "Conta Bling não conectada." });
 
-    const { data } = await axios.post(`${BLING_API}/pedidos/vendas`, corpo, {
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      timeout: 45000,
-    });
+    const { data } = await blingPost("/pedidos/vendas", token, corpo);
     res.json({ status: "SUCCESS", bling_write: true, bling: data });
   } catch (err) {
     res.status(502).json({
@@ -347,13 +554,10 @@ async function autoPushPaid(req, res) {
     const resultados = [];
     for (const pedido of lista) {
       try {
-        const { data } = await axios.post(
-          `${BLING_API}/pedidos/vendas`,
-          montarPedidoVenda(pedido),
-          {
-            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-            timeout: 45000,
-          }
+        const { data } = await blingPost(
+          "/pedidos/vendas",
+          token,
+          montarPedidoVenda(pedido)
         );
         resultados.push({ order_id: pedido.id, ok: true, bling_id: data?.data?.id });
       } catch (err) {
@@ -381,4 +585,5 @@ module.exports = {
   pushOrder,
   autoPushPaid,
   tokenValido,
+  redirectUri,
 };
