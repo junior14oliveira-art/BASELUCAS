@@ -210,6 +210,7 @@ async def get_web_ui():
     .app-toast.success {{ border-color: #10B981; }}
     .app-toast.error {{ border-color: #F43F5E; }}
     .app-toast.info {{ border-color: #38BDF8; }}
+    .app-toast.warning {{ border-color: #F59E0B; background: #292524; }}
     .app-toast .toast-actions {{ margin-top: 8px; display: flex; gap: 8px; }}
     .app-toast .toast-actions button {{ background: rgba(255,255,255,0.08); border: 1px solid var(--border); color: #FFF; border-radius: 6px; padding: 4px 10px; cursor: pointer; font-size: 0.75rem; font-weight: 700; }}
     .expedition-scan-wrap {{ display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }}
@@ -351,7 +352,7 @@ async def get_web_ui():
             <div class="card">
               <div class="kpi-title">STATUSES NO BANCO</div>
               <div class="kpi-value">{len(statuses_list)} status</div>
-              <span class="badge" style="background:rgba(16,185,129,0.2); color:var(--green); margin-top:8px;">BaseLinker Real IDs</span>
+              <span class="badge" style="background:rgba(16,185,129,0.2); color:var(--green); margin-top:8px;">IDs do cache SQLite</span>
             </div>
             <div class="card">
               <div class="kpi-title">PEDIDOS GRAVADOS</div>
@@ -555,6 +556,56 @@ async def get_web_ui():
               <span class="material-icons" style="color:var(--purple)">extension</span> Mapa de Módulos & Plugins
             </h3>
             <p style="font-size:0.85rem; color:var(--text-muted);">Módulos e extensões ativas no hub Base Lucas.</p>
+          </div>
+        </div>
+
+        <!-- View 7: Expedição — Pick & Pack + Bipagem ZPL (Etapa 4) -->
+        <div id="view-expedition" style="display:none;">
+          <div class="card" style="margin-bottom:16px; border-left:4px solid #22a564;">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
+              <div>
+                <h3 style="font-size:1.05rem; font-weight:800; color:#fff; display:flex; align-items:center; gap:8px;">
+                  <span class="material-icons" style="color:#22a564;">qr_code_scanner</span> Expedição — Bipagem & Impressão ZPL
+                </h3>
+                <p style="font-size:0.82rem; color:var(--text-muted); margin-top:6px; max-width:640px;">
+                  Bipe o código da caixa (scanner USB). O sistema só imprime se a etiqueta estiver engatilhada (Etapa 3).
+                  Falhas de impressora aparecem aqui — sem fingir sucesso.
+                </p>
+              </div>
+              <div style="text-align:right;">
+                <div id="expedition-printer-status" style="font-size:0.78rem; color:var(--text-muted); font-weight:700;">Impressora: carregando…</div>
+                <button type="button" class="btn-add-order" style="margin-top:8px; background:#334155;" onclick="refreshExpeditionPanel()">
+                  <span class="material-icons" style="font-size:16px;">refresh</span> Atualizar fila
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="card" style="margin-bottom:16px;">
+            <label for="expedition-scan-input" style="font-size:0.78rem; font-weight:800; color:#94A3B8; text-transform:uppercase;">Campo de bipagem (scanner USB)</label>
+            <div class="expedition-scan-wrap">
+              <input type="text" id="expedition-scan-input" class="expedition-scan-input" autocomplete="off"
+                placeholder="Bipe o pedido / shipping_id / tracking…" aria-label="Bipagem de expedição">
+              <span style="font-size:0.72rem; color:var(--text-muted);">Enter confirma a bipagem. O foco volta automaticamente para este campo.</span>
+            </div>
+          </div>
+
+          <div class="card">
+            <h4 style="font-size:0.9rem; font-weight:800; color:#fff; margin-bottom:12px;">Caixas prontas para bipagem</h4>
+            <table>
+              <thead>
+                <tr>
+                  <th>PEDIDO</th>
+                  <th>CLIENTE</th>
+                  <th>ETIQUETA</th>
+                  <th>STATUS</th>
+                  <th>TESTE</th>
+                </tr>
+              </thead>
+              <tbody id="expedition-ready-body">
+                <tr><td colspan="5" style="color:var(--text-muted); font-size:0.85rem;">Carregando fila…</td></tr>
+              </tbody>
+            </table>
           </div>
         </div>
 
@@ -764,7 +815,7 @@ async def get_web_ui():
     }}
 
     function openOrderModal(mode = 'NEW') {{
-      alert(`[BaseLucas] Adicionar / Editar pedido (${{mode}}).`);
+      _toast('Adicionar / editar pedido manual ainda não está disponível. Os pedidos vêm do sync Mercado Livre.', 'warning');
     }}
 
     function triggerBatchAction(action) {{
@@ -779,8 +830,7 @@ async def get_web_ui():
       if (action === 'nfe') {{
         const ids = Array.from(selectedOrderIds);
         if (!ids.length) {{
-          if (window.AppUx) AppUx.showToast('Selecione ao menos um pedido.', 'info');
-          else alert('Selecione ao menos um pedido.');
+          _toast('Selecione ao menos um pedido para enviar ao Bling.', 'info');
           return;
         }}
         (async () => {{
@@ -793,13 +843,15 @@ async def get_web_ui():
             }} catch (e) {{ blocked++; }}
           }}
           const msg = `Bling: ${{ok}} processado(s), ${{blocked}} bloqueado(s)/erro. NF-e só com NFE_EMIT_ENABLED=true.`;
-          if (window.AppUx) AppUx.showToast(msg, ok ? 'success' : 'info');
-          else alert(msg);
+          _toast(msg, ok ? 'success' : 'warning');
         }})();
         return;
       }}
-      const selCount = selectedOrderIds.size;
-      alert(`[BaseLucas] Ação em lote '${{action}}' executada para ${{selCount}} pedido(s) selecionado(s).`);
+      if (window.AppUx && AppUx.notifyStub) {{
+        AppUx.notifyStub(action, selectedOrderIds.size);
+      }} else {{
+        _toast('Esta ação em lote ainda não está disponível.', 'warning');
+      }}
     }}
 
     function toggleSelectAllOrders(checked) {{
@@ -1424,8 +1476,16 @@ async def get_web_ui():
       document.getElementById('view-automations').style.display = tabName === 'automations' ? 'block' : 'none';
       document.getElementById('view-marketplaces').style.display = tabName === 'marketplaces' ? 'block' : 'none';
       document.getElementById('view-integrations').style.display = tabName === 'integrations' ? 'block' : 'none';
+      document.getElementById('view-expedition').style.display = tabName === 'expedition' ? 'block' : 'none';
 
       if (tabName === 'products') renderProductsTable();
+      if (tabName === 'expedition') {{
+        refreshExpeditionPanel();
+        setTimeout(function() {{
+          const inp = document.getElementById('expedition-scan-input');
+          if (inp) inp.focus();
+        }}, 80);
+      }}
     }}
 
     function syncWithBaseLinkerAPI() {{
