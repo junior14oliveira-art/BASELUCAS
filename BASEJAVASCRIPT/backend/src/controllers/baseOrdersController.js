@@ -7,6 +7,7 @@
 const db = require('../db');
 const { pickupOrder, sendOrderToQueue, releaseOrder } = require('../services/orderPickup');
 const mlFeed = require('../services/mlFeedClient');
+const config = require('../config');
 
 function parseItems(itemsJson) {
   try {
@@ -27,7 +28,7 @@ function formatDate(value) {
 
 async function listStatuses(_req, res) {
   try {
-    const rows = await db.query('SELECT * FROM base_order_statuses ORDER BY id ASC');
+    const rows = await db.findMany('base_order_statuses', { orderBy: 'id ASC' });
     res.json(
       (rows || []).map((s) => ({
         id: Number(s.id),
@@ -45,16 +46,13 @@ async function listOrders(req, res) {
   try {
     const status = req.query.status;
     const search = (req.query.search || '').trim().toLowerCase();
-    let rows;
+    let orders = await db.findMany('base_orders', { orderBy: 'created_at DESC' });
+
     if (status && status !== 'Todos os pedidos') {
-      rows = await db.query('SELECT * FROM base_orders WHERE status_name = :status ORDER BY created_at DESC', {
-        status,
-      });
-    } else {
-      rows = await db.query('SELECT * FROM base_orders ORDER BY created_at DESC');
+      orders = orders.filter((o) => o.status_name === status);
     }
 
-    let output = (rows || []).map((o) => {
+    let output = orders.map((o) => {
       const items = parseItems(o.items_json);
       const itemDesc = items[0]
         ? `${items[0].name || items[0].title || ''} x${items[0].quantity || 1}`
@@ -111,14 +109,41 @@ async function syncNow(_req, res) {
 
     const orders = ordersPayload.orders || ordersPayload.results || [];
     let upserted = 0;
-    for (const raw of orders.slice(0, 50)) {
+
+    const existingOrderStatuses = await db.findMany('base_order_statuses');
+    const preservedPersonalStatuses = existingOrderStatuses.filter(s =>
+      (s.id >= 900000 || (s.name || '').startsWith('Fila · '))
+    ).map(s => ({ id: s.id, name: s.name, color: s.color }));
+
+    const existingOrderRows = await db.findMany('base_orders');
+    const pickupById = {};
+    for (const er of existingOrderRows) {
+      const pb = (er.picked_by || '').trim();
+      if (!pb) continue;
+      pickupById[String(er.id)] = {
+        picked_by: pb,
+        picked_by_id: Number(er.picked_by_id || 0),
+        picked_from_status_id: Number(er.picked_from_status_id || 0),
+        picked_from_status_name: er.picked_from_status_name || '',
+        picked_at: er.picked_at || null,
+        status_id: Number(er.status_id || 0),
+        status_name: er.status_name || '',
+      };
+    }
+
+    // Clear tables before re-inserting from feed
+    await db.remove('base_order_statuses', {});
+    await db.remove('base_orders', {});
+    await db.remove('base_products', {});
+
+    const normalizedOrders = [];
+    for (const raw of orders) {
       const id = String(raw.id || raw.order_id || '');
       if (!id) continue;
       const buyer = raw.buyer || {};
       const items = raw.order_items || raw.items || [];
       const total = Number(raw.total_amount || raw.paid_amount || 0);
-      const existing = await db.get('SELECT id FROM base_orders WHERE id = :id', { id });
-      const payload = {
+      normalizedOrders.push({
         id,
         external_id: String(raw.pack_id || raw.external_id || id),
         customer_name: buyer.nickname || buyer.first_name || raw.customer_name || 'Cliente ML',
@@ -131,32 +156,51 @@ async function syncNow(_req, res) {
         items_json: JSON.stringify(items),
         shipping_id: String(raw.shipping?.id || raw.shipping_id || ''),
         tracking_number: String(raw.shipping?.tracking_number || ''),
-      };
-      if (existing) {
-        await db.query(
-          `UPDATE base_orders SET
-            external_id = :external_id,
-            customer_name = :customer_name,
-            customer_email = :customer_email,
-            total_amount = :total_amount,
-            items_json = :items_json,
-            shipping_id = :shipping_id,
-            tracking_number = :tracking_number
-           WHERE id = :id`,
-          payload
-        );
-      } else {
-        await db.query(
-          `INSERT INTO base_orders
-            (id, external_id, customer_name, customer_email, customer_phone, status_id, status_name,
-             total_amount, channel_name, items_json, shipping_id, tracking_number)
-           VALUES
-            (:id, :external_id, :customer_name, :customer_email, :customer_phone, :status_id, :status_name,
-             :total_amount, :channel_name, :items_json, :shipping_id, :tracking_number)`,
-          { ...payload, customer_phone: '', status_id: 1, status_name: 'Novos pedidos', channel_name: 'Mercado Livre' }
-        );
+        created_at: raw.date_created || new Date().toISOString(),
+      });
+    }
+
+    // Simplified status handling for JSON store, only use predefined or preserved
+    const STATUS_CATALOG = [
+      { id: 1, name: 'Novos pedidos', color: '#1e88e5' },
+      { id: 2, name: 'Embalando', color: '#ffb300' },
+      { id: 3, name: 'Pronto P/ Envio', color: '#43a047' },
+      { id: 4, name: 'Enviado', color: '#039be5' },
+      { id: 5, name: 'Entregue', color: '#388e3c' },
+      { id: 6, name: 'Cancelado', color: '#d32f2f' },
+    ];
+    
+    for (const s of STATUS_CATALOG) {
+      s.count = normalizedOrders.filter(o => o.status_name === s.name).length;
+      await db.insert('base_order_statuses', s);
+    }
+
+    // Restore personal statuses
+    const presentIds = new Set(STATUS_CATALOG.map(s => s.id));
+    for (const ps of preservedPersonalStatuses) {
+      if (!presentIds.has(ps.id)) {
+        await db.insert('base_order_statuses', { ...ps, count: 0 });
+        presentIds.add(ps.id);
       }
-      upserted += 1;
+    }
+
+    for (const o of normalizedOrders) {
+      const oid = String(o.id || '');
+      const saved = pickupById[oid];
+      if (saved) {
+        o.picked_by = saved.picked_by;
+        o.picked_by_id = saved.picked_by_id;
+        o.picked_from_status_id = saved.picked_from_status_id;
+        o.picked_from_status_name = saved.picked_from_status_name;
+        o.picked_at = saved.picked_at;
+        // Only preserve original status if it was a personal queue, otherwise update with ML feed
+        if (saved.status_id >= 900000 || (saved.status_name || '').startsWith('Fila · ')) {
+          o.status_id = saved.status_id;
+          o.status_name = saved.status_name;
+        }
+      }
+      await db.insert('base_orders', o);
+      upserted++;
     }
 
     const meta = {
@@ -166,20 +210,7 @@ async function syncNow(_req, res) {
       source: 'ml_feed_4mc',
       ok: true,
     };
-
-    if (db.getDriver() === 'mysql') {
-      await db.query(
-        `INSERT INTO base_sync_meta (\`key\`, value, updated_at) VALUES (:k, :value, :updated)
-         ON DUPLICATE KEY UPDATE value = VALUES(value), updated_at = VALUES(updated_at)`,
-        { k: 'ml_feed_last_sync', value: JSON.stringify(meta), updated: meta.synced_at }
-      );
-    } else {
-      await db.query(
-        `INSERT INTO base_sync_meta (key, value, updated_at) VALUES (:k, :value, :updated)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-        { k: 'ml_feed_last_sync', value: JSON.stringify(meta), updated: meta.synced_at }
-      );
-    }
+    await db.upsertMeta('ml_feed_last_sync', JSON.stringify(meta));
 
     res.json({
       message: `Sincronização do feed Mercado Livre concluída (${upserted} pedidos).`,
@@ -197,14 +228,9 @@ async function syncNow(_req, res) {
 
 async function syncStatus(_req, res) {
   try {
-    let row = null;
-    try {
-      row = await db.get('SELECT * FROM base_sync_meta WHERE key = :k', { k: 'ml_feed_last_sync' });
-    } catch {
-      row = await db.get('SELECT * FROM base_sync_meta WHERE `key` = :k', { k: 'ml_feed_last_sync' });
-    }
-    const count = await db.get('SELECT COUNT(*) AS c FROM base_orders');
-    let payload = { synced_at: null, orders_in_db: Number(count?.c || 0) };
+    const row = await db.findOne('base_sync_meta', { key: 'ml_feed_last_sync' });
+    const count = await db.count('base_orders');
+    let payload = { synced_at: null, orders_in_db: Number(count || 0) };
     if (row?.value) {
       try {
         payload = { ...payload, ...JSON.parse(row.value) };
@@ -221,13 +247,13 @@ async function syncStatus(_req, res) {
 async function changeStatus(req, res) {
   try {
     const orderId = String(req.params.orderId);
-    const order = await db.get('SELECT * FROM base_orders WHERE id = :id', { id: orderId });
+    const order = await db.findOne('base_orders', { id: orderId });
     if (!order) return res.json({ status: 'ERROR', message: 'Pedido não encontrado no banco local.' });
     const statusId = Number(req.body?.status_id || 0);
     const statusName = req.body?.status_name || 'Em Processamento';
-    await db.query(
-      `UPDATE base_orders SET status_id = :statusId, status_name = :statusName WHERE id = :id`,
-      { statusId, statusName, id: orderId }
+    await db.update(
+      'base_orders', { id: orderId },
+      { status_id: statusId, status_name: statusName }
     );
     res.json({
       status: 'SUCCESS',
@@ -243,7 +269,7 @@ async function changeStatus(req, res) {
 async function pickup(req, res) {
   const operatorId = req.body?.operator_id;
   if (operatorId == null) {
-    return res.json({ ok: false, status: 'ERROR', error: 'operator_id é obrigatório.' });
+    return res.status(400).json({ ok: false, status: 'ERROR', error: 'operator_id é obrigatório.' });
   }
   const result = await pickupOrder(String(req.params.orderId), Number(operatorId));
   result.status = result.ok ? 'SUCCESS' : 'ERROR';
@@ -253,7 +279,7 @@ async function pickup(req, res) {
 async function sendToQueue(req, res) {
   const operatorId = req.body?.operator_id;
   if (operatorId == null) {
-    return res.json({ ok: false, status: 'ERROR', error: 'operator_id é obrigatório.' });
+    return res.status(400).json({ ok: false, status: 'ERROR', error: 'operator_id é obrigatório.' });
   }
   const target = req.body?.target_queue || req.body?.status_name;
   const result = await sendOrderToQueue(String(req.params.orderId), Number(operatorId), target);
@@ -264,7 +290,7 @@ async function sendToQueue(req, res) {
 async function release(req, res) {
   const operatorId = req.body?.operator_id;
   if (operatorId == null) {
-    return res.json({ ok: false, status: 'ERROR', error: 'operator_id é obrigatório.' });
+    return res.status(400).json({ ok: false, status: 'ERROR', error: 'operator_id é obrigatório.' });
   }
   const result = await releaseOrder(String(req.params.orderId), Number(operatorId));
   result.status = result.ok ? 'SUCCESS' : 'ERROR';
@@ -273,17 +299,13 @@ async function release(req, res) {
 
 async function exportCsv(req, res) {
   try {
-    const fakeReq = { query: req.query };
-    // Reusa listagem
     const status = req.query.status;
-    let rows;
+    let orders = await db.findMany('base_orders');
     if (status && status !== 'Todos os pedidos') {
-      rows = await db.query('SELECT * FROM base_orders WHERE status_name = :status', { status });
-    } else {
-      rows = await db.query('SELECT * FROM base_orders');
+      orders = orders.filter((o) => o.status_name === status);
     }
     const lines = ['ID,NOME COMPRADOR,EMAIL,TELEFONE,STATUS,TOTAL,DATA'];
-    for (const o of rows || []) {
+    for (const o of orders || []) {
       const esc = (v) => `"${String(v || '').replace(/"/g, '""')}"`;
       lines.push(
         [o.id, esc(o.customer_name), esc(o.customer_email), esc(o.customer_phone), esc(o.status_name), o.total_amount, esc(o.created_at)].join(',')

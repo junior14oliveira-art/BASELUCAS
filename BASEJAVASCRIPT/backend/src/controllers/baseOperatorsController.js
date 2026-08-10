@@ -44,32 +44,26 @@ function mapOperator(row) {
 }
 
 async function seedIfEmpty() {
-  const rows = await db.query('SELECT id FROM base_operators LIMIT 1');
-  if (Array.isArray(rows) && rows.length) {
+  const existing = await db.findMany('base_operators', { limit: 1 });
+  if (existing.length) {
     // normaliza roles legadas
-    const all = await db.query('SELECT * FROM base_operators');
+    const all = await db.findMany('base_operators');
     for (const op of all) {
       const canon = normalizeRole(op.role);
       if (op.role !== canon) {
-        await db.query('UPDATE base_operators SET role = :role WHERE id = :id', {
-          role: canon,
-          id: op.id,
-        });
+        await db.update('base_operators', { id: op.id }, { role: canon });
       }
     }
     return;
   }
   for (const op of INITIAL_OPERATORS) {
-    await db.query(
-      `INSERT INTO base_operators (id, name, role, email, is_active)
-       VALUES (:id, :name, :role, :email, 1)`,
-      {
-        id: op.id,
-        name: op.name,
-        role: normalizeRole(op.role),
-        email: op.email,
-      }
-    );
+    await db.insert('base_operators', {
+      id: op.id,
+      name: op.name,
+      role: normalizeRole(op.role),
+      email: op.email,
+      is_active: 1,
+    });
   }
 }
 
@@ -80,7 +74,7 @@ async function listRoles(_req, res) {
 async function listOperators(_req, res) {
   try {
     await seedIfEmpty();
-    const rows = await db.query('SELECT * FROM base_operators ORDER BY id ASC');
+    const rows = await db.findMany('base_operators', { orderBy: 'id ASC' });
     res.json((rows || []).map(mapOperator));
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
@@ -94,13 +88,8 @@ async function createOperator(req, res) {
     const role = normalizeRole(req.body?.role);
     const email = String(req.body?.email || '').trim();
     const isActive = req.body?.is_active === false ? 0 : 1;
-    const result = await db.query(
-      `INSERT INTO base_operators (name, role, email, is_active)
-       VALUES (:name, :role, :email, :isActive)`,
-      { name, role, email, isActive }
-    );
-    const id = result.insertId;
-    const row = await db.get('SELECT * FROM base_operators WHERE id = :id', { id });
+    const result = await db.insert('base_operators', { name, role, email, is_active: isActive });
+    const row = await db.findOne('base_operators', { id: result.insertId });
     res.status(201).json(mapOperator(row));
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
@@ -110,7 +99,7 @@ async function createOperator(req, res) {
 async function updateOperator(req, res) {
   try {
     const id = Number(req.params.operatorId);
-    const op = await db.get('SELECT * FROM base_operators WHERE id = :id', { id });
+    const op = await db.findOne('base_operators', { id });
     if (!op) return res.status(404).json({ detail: 'Operador não encontrado' });
 
     const name = req.body?.name != null ? String(req.body.name).trim() : op.name;
@@ -119,12 +108,8 @@ async function updateOperator(req, res) {
     const isActive =
       req.body?.is_active != null ? (req.body.is_active ? 1 : 0) : Number(op.is_active);
 
-    await db.query(
-      `UPDATE base_operators SET name = :name, role = :role, email = :email, is_active = :isActive
-       WHERE id = :id`,
-      { name, role, email, isActive, id }
-    );
-    const row = await db.get('SELECT * FROM base_operators WHERE id = :id', { id });
+    await db.update('base_operators', { id }, { name, role, email, is_active: isActive });
+    const row = await db.findOne('base_operators', { id });
     res.json(mapOperator(row));
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
@@ -134,9 +119,9 @@ async function updateOperator(req, res) {
 async function deleteOperator(req, res) {
   try {
     const id = Number(req.params.operatorId);
-    const op = await db.get('SELECT * FROM base_operators WHERE id = :id', { id });
+    const op = await db.findOne('base_operators', { id });
     if (!op) return res.status(404).json({ detail: 'Operador não encontrado' });
-    await db.query('DELETE FROM base_operators WHERE id = :id', { id });
+    await db.remove('base_operators', { id });
     res.json({ ok: true, message: `Operador #${id} removido com sucesso` });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });

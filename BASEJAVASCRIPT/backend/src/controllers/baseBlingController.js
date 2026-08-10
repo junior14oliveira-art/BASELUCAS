@@ -17,48 +17,27 @@ function mask(value, keep = 4) {
 
 async function getConfig(accountKey) {
   const key = accountKey || config.bling.accountKey;
-  return db.get('SELECT * FROM base_bling_config WHERE account_key = :key', { key });
+  return db.findOne('base_bling_config', { account_key: key });
 }
 
 async function upsertConfig(fields) {
   const key = fields.account_key || config.bling.accountKey;
   const existing = await getConfig(key);
   const now = new Date().toISOString();
+  const data = {
+    account_key: key,
+    client_id: fields.client_id || '',
+    client_secret: fields.client_secret || '',
+    access_token: fields.access_token || '',
+    refresh_token: fields.refresh_token || '',
+    expires_at: fields.expires_at || 0,
+    updated_at: now,
+  };
+
   if (existing) {
-    await db.query(
-      `UPDATE base_bling_config SET
-        client_id = COALESCE(:client_id, client_id),
-        client_secret = COALESCE(:client_secret, client_secret),
-        access_token = COALESCE(:access_token, access_token),
-        refresh_token = COALESCE(:refresh_token, refresh_token),
-        expires_at = COALESCE(:expires_at, expires_at),
-        updated_at = :updated
-       WHERE account_key = :key`,
-      {
-        key,
-        client_id: fields.client_id ?? null,
-        client_secret: fields.client_secret ?? null,
-        access_token: fields.access_token ?? null,
-        refresh_token: fields.refresh_token ?? null,
-        expires_at: fields.expires_at ?? null,
-        updated: now,
-      }
-    );
+    await db.update('base_bling_config', { account_key: key }, data);
   } else {
-    await db.query(
-      `INSERT INTO base_bling_config
-        (account_key, client_id, client_secret, access_token, refresh_token, expires_at, updated_at)
-       VALUES (:key, :client_id, :client_secret, :access_token, :refresh_token, :expires_at, :updated)`,
-      {
-        key,
-        client_id: fields.client_id || '',
-        client_secret: fields.client_secret || '',
-        access_token: fields.access_token || '',
-        refresh_token: fields.refresh_token || '',
-        expires_at: fields.expires_at || 0,
-        updated: now,
-      }
-    );
+    await db.insert('base_bling_config', data);
   }
   return getConfig(key);
 }
@@ -117,9 +96,7 @@ async function saveTokens(req, res) {
 }
 
 async function deleteConnection(_req, res) {
-  await db.query('DELETE FROM base_bling_config WHERE account_key = :key', {
-    key: config.bling.accountKey,
-  });
+  await db.remove('base_bling_config', { account_key: config.bling.accountKey });
   res.json({ ok: true, message: 'Conexão Bling removida.' });
 }
 
@@ -144,13 +121,11 @@ async function testConnection(_req, res) {
 
 async function pushOrder(req, res) {
   const orderId = String(req.params.orderId);
-  const order = await db.get('SELECT * FROM base_orders WHERE id = :id', { id: orderId });
+  const order = await db.findOne('base_orders', { id: orderId });
   if (!order) return res.status(404).json({ ok: false, error: 'Pedido não encontrado.' });
 
   if (config.bling.readOnly) {
-    await db.query(`UPDATE base_orders SET bling_status = 'skipped_read_only' WHERE id = :id`, {
-      id: orderId,
-    });
+    await db.update('base_orders', { id: orderId }, { bling_status: 'skipped_read_only' });
     return res.json({
       ok: false,
       blocked: true,
@@ -160,9 +135,7 @@ async function pushOrder(req, res) {
   }
 
   // Stub seguro: marca pending sem inventar sucesso fiscal
-  await db.query(`UPDATE base_orders SET bling_status = 'pedido_pending' WHERE id = :id`, {
-    id: orderId,
-  });
+  await db.update('base_orders', { id: orderId }, { bling_status: 'pedido_pending' });
   res.json({
     ok: true,
     message: `Pedido #${orderId} enfileirado para push Bling (implementar POST /pedidos/vendas no adapter 4M&C).`,
@@ -180,16 +153,13 @@ async function autoPushPaid(_req, res) {
       processed: 0,
     });
   }
-  const rows = await db.query(
-    `SELECT id FROM base_orders
-     WHERE (bling_status IS NULL OR bling_status = '' OR bling_status = 'pending')
-     LIMIT 20`
+  const rows = await db.findMany(
+    'base_orders',
+    { where: { bling_status: [null, '', 'pending'] }, limit: 20 }
   );
   let processed = 0;
   for (const row of rows || []) {
-    await db.query(`UPDATE base_orders SET bling_status = 'pedido_pending' WHERE id = :id`, {
-      id: row.id,
-    });
+    await db.update('base_orders', { id: row.id }, { bling_status: 'pedido_pending' });
     processed += 1;
   }
   res.json({

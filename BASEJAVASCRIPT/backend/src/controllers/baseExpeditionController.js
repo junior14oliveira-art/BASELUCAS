@@ -33,24 +33,40 @@ function orderPublic(order) {
 async function findOrderByBarcode(barcode) {
   const code = String(barcode || '').trim();
   if (!code) return null;
-  let row = await db.get(
-    `SELECT * FROM base_orders WHERE
-      id = :code OR external_id = :code OR shipping_id = :code OR tracking_number = :code
-     LIMIT 1`,
-    { code }
-  );
+  let row = await db.findOne('base_orders', {
+    id: code,
+  });
   if (row) return row;
+  row = await db.findOne('base_orders', {
+    external_id: code,
+  });
+  if (row) return row;
+  row = await db.findOne('base_orders', {
+    shipping_id: code,
+  });
+  if (row) return row;
+  row = await db.findOne('base_orders', {
+    tracking_number: code,
+  });
+  if (row) return row;
+
   const stripped = code.replace(/^#/, '').trim();
   if (stripped !== code) {
-    row = await db.get('SELECT * FROM base_orders WHERE id = :code LIMIT 1', { code: stripped });
+    row = await db.findOne('base_orders', { id: stripped });
     if (row) return row;
   }
-  const like = `%${code}%`;
-  return db.get(
-    `SELECT * FROM base_orders WHERE
-      id LIKE :like OR external_id LIKE :like OR shipping_id LIKE :like OR tracking_number LIKE :like
-     LIMIT 1`,
-    { like }
+
+  // Find many with like. Not implemented in JSON mode, so fetch all and filter.
+  const allOrders = await db.findMany('base_orders');
+  const like = code.toLowerCase();
+  return (
+    allOrders.find(
+      (o) =>
+        (o.id || '').toLowerCase().includes(like) ||
+        (o.external_id || '').toLowerCase().includes(like) ||
+        (o.shipping_id || '').toLowerCase().includes(like) ||
+        (o.tracking_number || '').toLowerCase().includes(like)
+    ) || null
   );
 }
 
@@ -61,13 +77,8 @@ async function getPrinter(_req, res) {
 async function listReady(req, res) {
   try {
     const limit = Math.max(1, Math.min(Number(req.query.limit || 50), 200));
-    const rows = await db.query(
-      `SELECT * FROM base_orders
-       WHERE zpl_armed = 1 OR zpl_status = 'ready'
-       ORDER BY created_at DESC
-       LIMIT ${limit}`
-    );
-    const ready = (rows || []).filter(isZplArmed);
+    const allOrders = await db.findMany('base_orders', { orderBy: 'created_at DESC' });
+    const ready = allOrders.filter((o) => isZplArmed(o)).slice(0, limit);
     res.json({
       ok: true,
       total: ready.length,
@@ -91,16 +102,12 @@ async function scanAndPrint(req, res) {
       });
     }
 
-    await db.query(
-      `INSERT INTO base_expedition_scans (barcode, order_id, status, scanned_at)
-       VALUES (:barcode, :orderId, :status, :scannedAt)`,
-      {
-        barcode,
-        orderId: order.id,
-        status: isZplArmed(order) ? 'armed' : 'not_armed',
-        scannedAt: new Date().toISOString(),
-      }
-    );
+    await db.insert('base_expedition_scans', {
+      barcode,
+      order_id: order.id,
+      status: isZplArmed(order) ? 'armed' : 'not_armed',
+      scanned_at: new Date().toISOString(),
+    });
 
     if (!isZplArmed(order)) {
       return res.status(409).json({
@@ -124,11 +131,8 @@ async function scanAndPrint(req, res) {
     }
 
     const now = new Date().toISOString();
-    await db.query(`UPDATE base_orders SET zpl_printed_at = :now WHERE id = :id`, {
-      now,
-      id: order.id,
-    });
-    const updated = await db.get('SELECT * FROM base_orders WHERE id = :id', { id: order.id });
+    await db.update('base_orders', { id: order.id }, { zpl_printed_at: now });
+    const updated = await db.findOne('base_orders', { id: order.id });
 
     res.json({
       ok: true,
@@ -145,7 +149,7 @@ async function scanAndPrint(req, res) {
 async function armForTest(req, res) {
   try {
     const orderId = String(req.params.orderId);
-    const order = await db.get('SELECT * FROM base_orders WHERE id = :id', { id: orderId });
+    const order = await db.findOne('base_orders', { id: orderId });
     if (!order) return res.status(404).json({ detail: `Pedido #${orderId} não encontrado.` });
 
     const zpl =
@@ -154,24 +158,46 @@ async function armForTest(req, res) {
     const now = new Date().toISOString();
     const markReady = req.body?.mark_ready_status !== false;
 
-    await db.query(
-      `UPDATE base_orders SET
-        zpl_armed = 1,
-        zpl_content = :zpl,
-        zpl_status = 'ready',
-        status_name = CASE WHEN :markReady = 1 THEN 'Pronto para Bipagem' ELSE status_name END
-       WHERE id = :id`,
-      { zpl, markReady: markReady ? 1 : 0, id: orderId }
-    );
-
-    // SQLite CASE above may differ — force status if needed
+    // Update the order, handling SQLite's boolean storage (0 or 1)
+    const updateData = {
+      zpl_armed: 1,
+      zpl_content: zpl,
+      zpl_status: 'ready',
+      zpl_ready_at: now,
+    };
     if (markReady) {
-      await db.query(`UPDATE base_orders SET status_name = 'Pronto para Bipagem' WHERE id = :id`, {
-        id: orderId,
-      });
+      updateData.status_name = 'Pronto para Bipagem';
+      // Also ensure status_id is updated if needed for the UI
+      const readyStatus = await db.findOne('base_order_statuses', { name: 'Pronto para Bipagem' });
+      if (readyStatus) updateData.status_id = readyStatus.id;
+      else {
+        // If not found, create a new status entry (e.g., in JSON mode)
+        const maxId = await db.findOne('base_order_statuses', { orderBy: 'id DESC' });
+        const newId = (maxId ? Number(maxId.id) : 0) + 1;
+        await db.insert('base_order_statuses', {
+          id: newId,
+          name: 'Pronto para Bipagem',
+          color: '#43a047',
+          count: 0,
+        });
+        updateData.status_id = newId;
+      }
     }
+    await db.update('base_orders', { id: orderId }, updateData);
 
-    const updated = await db.get('SELECT * FROM base_orders WHERE id = :id', { id: orderId });
+    // Espelha no enrichment para leitores que só olhem o JSON (se houver enrichment_json no order, atualizar)
+    let enrich = {};
+    try {
+      enrich = JSON.parse(order.enrichment_json || '{}');
+    } catch (e) {
+      console.warn('Erro ao parsear enrichment_json existente:', e.message);
+    }
+    enrich.zpl_armed = true;
+    enrich.zpl_content = zpl;
+
+    await db.update('base_orders', { id: orderId }, { enrichment_json: JSON.stringify(enrich) });
+
+    const updated = await db.findOne('base_orders', { id: orderId });
     res.json({
       ok: true,
       message: `ZPL engatilhada no pedido #${orderId} (teste / Etapa 3 simulada).`,

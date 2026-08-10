@@ -61,20 +61,20 @@ async function kpis(req, res) {
   try {
     const period = req.query.period || 'total';
     const { from, to } = periodRange(period, req.query.from, req.query.to);
-    const rows = await db.query('SELECT * FROM base_orders');
-    const filtered = (rows || []).filter((o) => inRange(o.created_at, from, to));
+    const allOrders = await db.findMany('base_orders');
+    const filtered = (allOrders || []).filter((o) => inRange(o.created_at, from, to));
     const revenue = filtered.reduce((s, o) => s + Number(o.total_amount || 0), 0);
     const ticket = filtered.length ? revenue / filtered.length : 0;
-    const products = await db.get('SELECT COUNT(*) AS c FROM base_products');
-    const lowStock = await db.get('SELECT COUNT(*) AS c FROM base_products WHERE stock <= 5');
+    const products = await db.count('base_products');
+    const lowStock = await db.count('base_products', { stock: { '$lte': 5 } }); // JSON mode filter for <= 5
 
     res.json({
       period,
       faturamento_total: revenue,
       ticket_medio: ticket,
       pedidos_total: filtered.length,
-      produtos_total: Number(products?.c || 0),
-      estoque_baixo: Number(lowStock?.c || 0),
+      produtos_total: Number(products || 0),
+      estoque_baixo: Number(lowStock || 0),
       source: 'base_orders',
       from: from ? from.toISOString() : null,
       to: to ? to.toISOString() : null,
@@ -88,8 +88,8 @@ async function series(req, res) {
   try {
     const period = req.query.period || '7dias';
     const { from, to } = periodRange(period, req.query.from, req.query.to);
-    const rows = await db.query('SELECT created_at, total_amount, status_name FROM base_orders');
-    const filtered = (rows || []).filter((o) => inRange(o.created_at, from, to));
+    const allOrders = await db.findMany('base_orders');
+    const filtered = (allOrders || []).filter((o) => inRange(o.created_at, from, to));
 
     const byDay = new Map();
     const byStatus = new Map();
@@ -123,12 +123,10 @@ async function series(req, res) {
 async function recentOrders(req, res) {
   try {
     const limit = Math.max(1, Math.min(Number(req.query.limit || 20), 100));
-    const rows = await db.query(
-      `SELECT * FROM base_orders ORDER BY created_at DESC LIMIT ${limit}`
-    );
+    const orders = await db.findMany('base_orders', { orderBy: 'created_at DESC', limit });
     res.json({
       ok: true,
-      orders: (rows || []).map((o) => ({
+      orders: (orders || []).map((o) => ({
         id: o.id,
         marketplace: o.channel_name || 'Mercado Livre',
         customer: o.customer_name,
