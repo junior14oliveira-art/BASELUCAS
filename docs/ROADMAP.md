@@ -16,10 +16,10 @@ Este é o mapa de batalha para finalizarmos 100% o motor do **Pipeline Assíncro
 | Etapa | Tema | Status | Resumo |
 |---|---|---|---|
 | **Pré-req.** | Infra + feed ML → SQLite | 🟢 Concluído | FastAPI, `/app`, sync 4MC, Guia Pedidos |
-| **1** | Usuários + pickup Kanban | 🟡 Em andamento | API + seletor + modal CRUD; falta wiring Pegar/Enviar na UI |
+| **1** | Usuários + pickup Kanban | 🟢 Concluído | CRUD, aba Equipe, Pegar/Enviar/Liberar; JWT futuro |
 | **2** | Macro fiscal (Bling) | 🟡 Em andamento | OAuth, push pedido, auto-push no sync; NF-e gated |
 | **3** | Webhook + ZPL engatilhado | 🟢 Implementado | Código completo; homologação ML/Bling para ponta a ponta real |
-| **4** | Bipagem + impressão | 🟡 Em andamento | API `/expedition/scan` pronta; UI expedição sem JS de bipagem |
+| **4** | Bipagem + impressão | 🟡 Em andamento | UI + API prontas; falta impressora física em bancada |
 
 **Bloqueios de homologação (não são “não iniciado”):**  
 `BLING_READ_ONLY=true` · `NFE_EMIT_ENABLED=false` · `ML_READ_ONLY=true` (default) — ver `docs/LABELS_ML.md`.
@@ -96,7 +96,7 @@ Aqui é onde o sistema "ouve" o Bling e busca a etiqueta no Mercado Livre.
 ---
 
 ## 🎯 ETAPA 4: A Convergência Física (Pick & Pack + Impressão)
-**Status:** 🟡 Em andamento
+**Status:** 🟡 Em andamento *(UI + API prontas; bancada física pendente)*
 
 O ápice do pipeline: o encontro entre a caixa física (que o técnico já embalou na Etapa 1) e a Etiqueta ZPL (que a Etapa 3 acabou de destravar).
 
@@ -104,7 +104,7 @@ O ápice do pipeline: o encontro entre a caixa física (que o técnico já embal
 - [x] Lista de caixas prontas: `GET /api/v1/expedition/ready` — `expedition.py`
 - [x] Impressora: modos `dry_run` / `raw` (TCP 9100) / `cups` — `zpl_printer.py` · env `ZPL_PRINT_MODE`
 - [x] Aba **Expedição** no rail `/app` (HTML + campo scanner) — `web_ui.py`
-- [ ] JavaScript da aba expedição (`refreshExpeditionPanel`, handler Enter no scanner) — **referenciado mas ainda não implementado**
+- [x] JavaScript da aba expedição (`refreshExpeditionPanel`, `submitExpeditionScan`, Enter no scanner) — `web_ui.py`
 - [ ] Impressão física em bancada (Zebra/Elgin) com `ZPL_PRINT_MODE=raw` ou `cups` configurado
 - [ ] Teste operacional: bipar caixa real → etiqueta na impressora
 
@@ -119,7 +119,7 @@ O ápice do pipeline: o encontro entre a caixa física (que o técnico já embal
 
 ## Próximos focos sugeridos (ordem)
 
-1. **Etapa 4 — UI:** implementar `refreshExpeditionPanel` + bipagem Enter → `/expedition/scan`
-2. **Etapa 1 — UI:** botões Pegar/Enviar/Liberar na lista de pedidos usando operador do header
-3. **Etapa 2 — homologação:** credenciais Bling + primeiro push/NF-e real com flags liberadas
-4. **Etapa 3 — deploy:** URL pública do webhook + teste SEFAZ → ZPL engatilhado de ponta a ponta
+1. **Etapa 4 — bancada:** configurar `ZPL_PRINT_MODE=raw` (ou `cups`) e testar bipagem → impressora física
+2. **Etapa 2 — homologação:** credenciais Bling + primeiro push/NF-e real com flags liberadas
+3. **Etapa 3 — deploy:** URL pública do webhook + teste SEFAZ → ZPL engatilhado de ponta a ponta
+4. **Etapa 1 — auth:** login/sessão JWT (substituir seletor local de operador)
