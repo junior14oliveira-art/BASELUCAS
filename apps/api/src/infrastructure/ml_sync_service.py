@@ -7,6 +7,7 @@ a fonte usada pelo dashboard e pelos agentes.
 
 import json
 import time
+import asyncio
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -80,6 +81,9 @@ class MercadoLivreSyncService:
         scroll_id: Optional[str] = None
 
         while len(item_ids) < max_items:
+            # Respeita Rate Limit do ML (evita 429 Too Many Requests)
+            await asyncio.sleep(0.35)
+            
             page = await client.scan_user_items(status=status, scroll_id=scroll_id, limit=100)
             results = page.get("results", [])
             if not results:
@@ -152,6 +156,9 @@ class MercadoLivreSyncService:
         orders: List[Dict[str, Any]] = []
         offset = 0
         while len(orders) < max_orders:
+            # Respeita Rate Limit do ML (evita 429 Too Many Requests)
+            await asyncio.sleep(0.35)
+            
             page = await client.search_orders(
                 status=status, date_from=date_from, limit=50, offset=offset
             )
