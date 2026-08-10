@@ -48,6 +48,17 @@ class RealOrderDB(Base):
     bling_status: Mapped[str] = mapped_column(String(50), default="")  # pending|pedido_criado|nfe_*|skipped_*|error
     bling_last_error: Mapped[str] = mapped_column(Text, default="")
     bling_pushed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # Gatilho Logística (Etapa 3) — chave NF-e + ZPL engatilhado
+    nfe_access_key: Mapped[str] = mapped_column(String(60), default="")
+    ml_billing_inject_status: Mapped[str] = mapped_column(String(50), default="")  # pending|ok|gated_read_only|error
+    zpl_status: Mapped[str] = mapped_column(String(50), default="")  # pending|ready|gated|error
+    zpl_path: Mapped[str] = mapped_column(String(500), default="")
+    zpl_ready_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    # Etapa 3 engatilha ZPL; Etapa 4 só lê e imprime
+    zpl_armed: Mapped[bool] = mapped_column(Boolean, default=False)
+    zpl_content: Mapped[str] = mapped_column(Text, default="")
+    nfe_access_key: Mapped[str] = mapped_column(String(64), default="")
+    zpl_printed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 class RealProductDB(Base):
     __tablename__ = "real_products"
@@ -283,5 +294,9 @@ def _ensure_real_orders_columns(sync_conn) -> None:
             ("bling_status", "ALTER TABLE real_orders ADD COLUMN bling_status VARCHAR(50) DEFAULT ''"),
             ("bling_last_error", "ALTER TABLE real_orders ADD COLUMN bling_last_error TEXT DEFAULT ''"),
             ("bling_pushed_at", "ALTER TABLE real_orders ADD COLUMN bling_pushed_at DATETIME"),
+            ("zpl_armed", "ALTER TABLE real_orders ADD COLUMN zpl_armed BOOLEAN DEFAULT 0"),
+            ("zpl_content", "ALTER TABLE real_orders ADD COLUMN zpl_content TEXT DEFAULT ''"),
+            ("nfe_access_key", "ALTER TABLE real_orders ADD COLUMN nfe_access_key VARCHAR(64) DEFAULT ''"),
+            ("zpl_printed_at", "ALTER TABLE real_orders ADD COLUMN zpl_printed_at DATETIME"),
         ],
     )

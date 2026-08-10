@@ -299,3 +299,7 @@ class BlingClient:
     async def get_empresa(self) -> Dict[str, Any]:
         """GET leve para validar token (não marca 'conectado' sozinho na UI)."""
         return await self.get("/empresas/meus-dados")
+
+    async def get_nfe(self, nfe_id: str | int) -> Dict[str, Any]:
+        """GET /nfe/{id} — chave de acesso / XML após SEFAZ (Etapa 3 webhook)."""
+        return await self.get(f"/nfe/{nfe_id}")

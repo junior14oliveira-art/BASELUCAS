@@ -15,7 +15,9 @@ from src.infrastructure.database import (
     async_session,
     init_db,
 )
+from src.domain.operator_roles import ROLE_ADMIN
 from src.infrastructure.native_queues import (
+    PERSONAL_STATUS_ID_BASE,
     default_send_queue_name,
     is_personal_status_id,
     is_personal_status_name,
@@ -165,19 +167,15 @@ async def send_order_to_queue(
         if not order:
             return {"ok": False, "error": "Pedido não encontrado no banco local."}
 
+        role = normalize_role(operator.role)
         picked_id = int(getattr(order, "picked_by_id", 0) or 0)
-        if picked_id and picked_id != int(operator.id):
+        if picked_id and picked_id != int(operator.id) and role != ROLE_ADMIN:
             return {
                 "ok": False,
-                "error": f"Pedido está com {order.picked_by}. Só quem pegou (ou Admin) pode enviar.",
+                "error": f"Pedido está com {order.picked_by}. Só quem pegou ou Admin pode enviar.",
             }
-        # Admin pode forçar
-        role = normalize_role(operator.role)
-        if picked_id and picked_id != int(operator.id) and role != "Administrador":
-            return {"ok": False, "error": "Sem permissão para enviar este pedido."}
 
         if not (getattr(order, "picked_by", None) or "").strip():
-            # Ainda permite enviar se estiver em fila pessoal por nome
             if not is_personal_status_name(order.status_name) and not is_personal_status_id(
                 order.status_id
             ):
@@ -189,11 +187,10 @@ async def send_order_to_queue(
         dest_name = (target_queue or "").strip() or default_send_queue_name(role)
         dest = await _find_status_by_name(session, dest_name)
         if not dest:
-            # Cria fila destino se não existir (nativa)
             max_id = 0
             all_st = (await session.execute(select(RealOrderStatusDB))).scalars().all()
             for s in all_st:
-                if int(s.id) < PERSONAL_STATUS_ID_BASE_SAFE():
+                if int(s.id) < PERSONAL_STATUS_ID_BASE:
                     max_id = max(max_id, int(s.id))
             dest = RealOrderStatusDB(
                 id=max_id + 1 if max_id else 50,
@@ -221,12 +218,6 @@ async def send_order_to_queue(
             "message": f"Pedido #{order_id} enviado para {dest.name}.",
             "order": _order_payload(order),
         }
-
-
-def PERSONAL_STATUS_ID_BASE_SAFE() -> int:
-    from src.infrastructure.native_queues import PERSONAL_STATUS_ID_BASE
-
-    return PERSONAL_STATUS_ID_BASE
 
 
 async def release_order(order_id: str, operator_id: int) -> Dict[str, Any]:

@@ -473,19 +473,20 @@ async def auto_push_paid_orders(*, limit: int = 25) -> Dict[str, Any]:
         result = await session.execute(select(RealOrderDB).limit(500))
         orders = list(result.scalars().all())
 
+    retryable = {"", "error", "nfe_error", "awaiting_oauth", "awaiting_credentials"}
+    if not bling_read_only():
+        # Quando liberar escrita, reprocessa os que só tinham sido marcados em dry/read-only
+        retryable |= {"skipped_read_only", "dry_run", "nfe_skipped_disabled"}
+
     candidates = [
         o
         for o in orders
         if order_looks_paid(o)
         and not (o.bling_pedido_id or "").strip()
-        and (o.bling_status or "") not in ("skipped_read_only", "dry_run", "awaiting_credentials", "awaiting_oauth")
+        and (o.bling_status or "") in retryable
     ][:limit]
 
-    # Em READ_ONLY ainda processamos para marcar skipped_read_only (transparência)
     for o in candidates:
-        # Evita reprocessar o mesmo skipped em loop de sync
-        if (o.bling_status or "") == "skipped_read_only":
-            continue
         res = await push_order_to_bling(o.id, dry_run=False, emit_nfe=True)
         results.append(
             {

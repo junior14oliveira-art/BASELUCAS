@@ -85,6 +85,13 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
 
+    # Etapa 3 — ZPL engatilhado em disco (sem impressão; Etapa 4 = CUPS/USB)
+    # Relativo a apps/api/ ou caminho absoluto.
+    ZPL_LABELS_DIR: str = "data/zpl_labels"
+    # Se true, com ML_READ_ONLY ainda marca "Pronto para Bipagem" após chave SEFAZ
+    # (ZPL fica pending/gated até homologar write no ML).
+    LOGISTICS_UNLOCK_ON_NFE_KEY: bool = True
+
     # Etapa 4 — impressão ZPL (Zebra/Elgin). dry_run = sem hardware.
     # ZPL_PRINT_MODE: dry_run | raw | cups
     ZPL_PRINT_MODE: str = "dry_run"
