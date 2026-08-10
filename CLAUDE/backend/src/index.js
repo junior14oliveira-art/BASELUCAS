@@ -37,9 +37,12 @@ app.use((req, res, next) => {
 
 app.use("/api/v1/base", baseRoutes);
 
-app.get("/", (req, res) =>
-  res.json({ module: "Base Lucas", base_url: "/api/v1/base", health: "/api/v1/base/health" })
-);
+// Frontend estático. Em produção ele vive no HostGator; aqui é servido junto
+// para dar um alvo de teste local sem precisar de um segundo servidor.
+const path = require("path");
+app.use("/app", express.static(path.join(__dirname, "..", "..", "frontend")));
+
+app.get("/", (req, res) => res.redirect("/app"));
 
 const PORT = Number(process.env.PORT || 3000);
 

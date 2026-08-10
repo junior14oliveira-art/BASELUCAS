@@ -47,6 +47,18 @@ async function up() {
     )${engine}
   `);
 
+  // Cadastro das filas operacionais. No Python elas vinham do import
+  // read-only do BaseLinker; aqui viram tabela própria para a sidebar
+  // mostrar TODAS as filas, inclusive as que estão com zero pedido.
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS base_order_statuses (
+      id INT PRIMARY KEY,
+      name VARCHAR(255) NOT NULL,
+      color VARCHAR(50) DEFAULT '#64748B',
+      sort_order INT DEFAULT 0
+    )${engine}
+  `);
+
   await db.execute(`
     CREATE TABLE IF NOT EXISTS base_expedition_scans (
       id ${pk},

@@ -40,11 +40,14 @@ async function pickupOrder(orderId, operatorId) {
   const pedido = await pedidos.buscarPedido(orderId);
   if (!pedido) return { ok: false, error: "Pedido não encontrado." };
 
-  const jaPego = await pickupAtivo(orderId);
-  if (jaPego) {
+  // Só bloqueia quando há um operador de verdade segurando o pedido. Um
+  // overlay com operator_id = 0 é resultado de um "Enviar": o pedido está numa
+  // fila geral e pode ser puxado de novo por quem tiver a role certa.
+  const overlay = await pickupAtivo(orderId);
+  if (overlay && Number(overlay.operator_id) > 0) {
     return {
       ok: false,
-      error: `Pedido já está com ${jaPego.operator_name}. Liberar antes de pegar de novo.`,
+      error: `Pedido já está com ${overlay.operator_name}. Liberar antes de pegar de novo.`,
     };
   }
 
@@ -62,12 +65,25 @@ async function pickupOrder(orderId, operatorId) {
   }
 
   const filaPessoal = personalQueueName(operador.name);
-  await db.execute(
-    `INSERT INTO base_order_pickups
-       (order_id, operator_id, operator_name, status_name, origin_status_name, released, picked_at)
-     VALUES (?, ?, ?, ?, ?, 0, ?)`,
-    [String(orderId), Number(operador.id), operador.name, filaPessoal, filaAtual, agora()]
-  );
+
+  // Reaproveita o overlay órfão em vez de criar um segundo ativo — dois
+  // registros com released = 0 duplicariam o pedido no LEFT JOIN.
+  if (overlay) {
+    await db.execute(
+      `UPDATE base_order_pickups
+          SET operator_id = ?, operator_name = ?, status_name = ?,
+              origin_status_name = ?, picked_at = ?
+        WHERE id = ?`,
+      [Number(operador.id), operador.name, filaPessoal, filaAtual, agora(), overlay.id]
+    );
+  } else {
+    await db.execute(
+      `INSERT INTO base_order_pickups
+         (order_id, operator_id, operator_name, status_name, origin_status_name, released, picked_at)
+       VALUES (?, ?, ?, ?, ?, 0, ?)`,
+      [String(orderId), Number(operador.id), operador.name, filaPessoal, filaAtual, agora()]
+    );
+  }
 
   return {
     ok: true,

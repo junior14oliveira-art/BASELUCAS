@@ -159,6 +159,65 @@ async function saveCredentials(req, res) {
   }
 }
 
+/** POST /api/v1/base/bling/tokens — cola manual de tokens já obtidos. */
+async function saveTokens(req, res) {
+  try {
+    const { access_token, refresh_token, expires_in, account_key } = req.body || {};
+    if (!access_token) return res.status(400).json({ error: "access_token é obrigatório." });
+    const cfg = await salvarConfig(String(account_key || "default"), {
+      access_token,
+      refresh_token: refresh_token || "",
+      expires_at: Math.floor(Date.now() / 1000) + Number(expires_in || 21600),
+    });
+    res.json({ ok: true, account_key: cfg.account_key, connected: true });
+  } catch (err) {
+    res.status(500).json({ error: "Falha ao salvar tokens", detail: err.message });
+  }
+}
+
+/** POST /api/v1/base/bling/test — valida o token contra a API do Bling. */
+async function testConnection(req, res) {
+  try {
+    const token = await tokenValido(String(req.query.account_key || "default"));
+    if (!token) return res.status(412).json({ ok: false, error: "Conta Bling não conectada." });
+
+    const { data } = await axios.get(`${BLING_API}/situacoes/modulos`, {
+      headers: { Authorization: `Bearer ${token}` },
+      timeout: 30000,
+    });
+    res.json({
+      ok: true,
+      message: "Conexão com o Bling respondendo.",
+      modulos: Array.isArray(data?.data) ? data.data.length : undefined,
+    });
+  } catch (err) {
+    const http = err.response?.status;
+    res.status(502).json({
+      ok: false,
+      error:
+        http === 401
+          ? "Token do Bling recusado (401). Refaça a autorização OAuth."
+          : `Bling não respondeu${http ? ` (HTTP ${http})` : ""}: ${err.message}`,
+    });
+  }
+}
+
+/** DELETE /api/v1/base/bling/connection — desconecta sem apagar as credenciais. */
+async function clearConnection(req, res) {
+  try {
+    const accountKey = String(req.query.account_key || "default");
+    const cfg = await carregarConfig(accountKey);
+    if (!cfg) return res.status(404).json({ error: "Conta não encontrada." });
+    await salvarConfig(accountKey, { access_token: "", refresh_token: "", expires_at: 0 });
+    res.json({
+      ok: true,
+      message: "Conexão Bling encerrada. Client ID/Secret preservados.",
+    });
+  } catch (err) {
+    res.status(500).json({ error: "Falha ao desconectar", detail: err.message });
+  }
+}
+
 /** GET /api/v1/base/bling/auth — monta a URL de autorização OAuth v3. */
 async function authStart(req, res) {
   try {
@@ -314,6 +373,9 @@ async function autoPushPaid(req, res) {
 module.exports = {
   status,
   saveCredentials,
+  saveTokens,
+  testConnection,
+  clearConnection,
   authStart,
   authCallback,
   pushOrder,

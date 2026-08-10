@@ -114,6 +114,28 @@ async function status(req, res) {
   }
 }
 
+/**
+ * POST /api/v1/base/ml/credentials
+ * Grava App ID / Secret em memória do processo (process.env). Em produção o
+ * certo é a variável de ambiente do Render — isto existe para o card da tela
+ * conseguir configurar sem redeploy, igual ao comportamento do original.
+ */
+async function saveCredentials(req, res) {
+  const { client_id, client_secret, redirect_uri } = req.body || {};
+  if (!client_id || !client_secret) {
+    return res.status(400).json({ error: "client_id e client_secret são obrigatórios." });
+  }
+  process.env.ML_CLIENT_ID = String(client_id).trim();
+  process.env.ML_CLIENT_SECRET = String(client_secret).trim();
+  if (redirect_uri) process.env.ML_REDIRECT_URI = String(redirect_uri).trim();
+  // Nunca devolver o secret de volta.
+  res.json({
+    ok: true,
+    configured: true,
+    message: "Credenciais ML salvas nesta instância. Autorize a conta em /ml/auth.",
+  });
+}
+
 /** GET /api/v1/base/ml/auth */
 async function authStart(req, res) {
   const clientId = process.env.ML_CLIENT_ID;
@@ -198,16 +220,45 @@ async function getFeed(req, res) {
   }
 }
 
+/** Erro com causa legível — o operador não deve ver "Request failed with 401". */
+class BridgeError extends Error {
+  constructor(mensagem, causa) {
+    super(mensagem);
+    this.causa = causa;
+  }
+}
+
 /** Puxa uma página de pedidos do bridge. Limite máximo do 4MC é 50. */
 async function paginaBridge(offset, limit) {
-  const { data } = await axios.get(`${FEED_BASE}/orders`, {
-    params: { offset, limit: Math.min(limit, 50) },
-    timeout: 60000,
-  });
-  return {
-    orders: data?.orders || [],
-    total: Number(data?.paging?.total || 0),
-  };
+  try {
+    const { data } = await axios.get(`${FEED_BASE}/orders`, {
+      params: { offset, limit: Math.min(limit, 50) },
+      timeout: 60000,
+    });
+    return {
+      orders: data?.orders || [],
+      total: Number(data?.paging?.total || 0),
+    };
+  } catch (err) {
+    const http = err.response?.status;
+    if (http === 401 || http === 403) {
+      throw new BridgeError(
+        "O bridge 4MC recusou a consulta (token do Mercado Livre expirado). " +
+          "Renove a autorização do ML no serviço 4MC — o Base Lucas não guarda esse token.",
+        "bridge_token_expirado"
+      );
+    }
+    if (http === 429) {
+      throw new BridgeError(
+        "O bridge 4MC está limitando as chamadas (429). Tente de novo em alguns minutos.",
+        "bridge_rate_limit"
+      );
+    }
+    throw new BridgeError(
+      `Bridge 4MC indisponível${http ? ` (HTTP ${http})` : ""}: ${err.message}`,
+      "bridge_indisponivel"
+    );
+  }
 }
 
 /**
@@ -219,7 +270,16 @@ async function syncNow(req, res) {
     const resultado = await executarSync(Number(req.query.max_pages || 4));
     res.json(resultado);
   } catch (err) {
-    res.status(500).json({ ok: false, error: "Falha no sync", detail: err.message });
+    // 502: quem falhou foi o serviço de fora, não este.
+    const externo = err instanceof BridgeError;
+    res.status(externo ? 502 : 500).json({
+      ok: false,
+      error: err.message,
+      cause: err.causa || "erro_interno",
+      hint: externo
+        ? "Nada a corrigir no Base Lucas — a origem dos dados precisa ser reautorizada."
+        : undefined,
+    });
   }
 }
 
@@ -296,6 +356,7 @@ function iniciarCronSync(intervaloMs = 5 * 60 * 1000) {
 
 module.exports = {
   status,
+  saveCredentials,
   authStart,
   authCallback,
   getFeed,
