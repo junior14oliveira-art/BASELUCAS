@@ -274,7 +274,7 @@ async def get_web_ui():
         </div>
         <div class="search-pill">
           <span class="material-icons" style="color:var(--text-muted); font-size:18px;">search</span>
-          <input type="text" id="global-search" placeholder="Szukaj / Buscar pedido, cliente, SKU..." oninput="filterGlobalData(this.value)">
+          <input type="text" id="global-search" placeholder="Buscar pedido, cliente, SKU..." aria-label="Buscar pedido, cliente ou SKU" oninput="filterGlobalData(this.value)">
         </div>
       </div>
 
