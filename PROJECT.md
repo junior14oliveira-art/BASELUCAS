@@ -16,8 +16,8 @@ FastAPI backend (`apps/api/src/main.py`, router `apps/api/src/presentation/route
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|-------------|--------|
-| 1 | Implementation Fix | Fix web_ui.py f-strings, missing JS functions, DOM IDs, and JS syntax | None | IN_PROGRESS |
-| 2 | E2E & Unit Testing | Build test suite to verify HTTP 200, no JS reference errors, and sidebar/excel functionality | None | IN_PROGRESS |
+| 1 | Implementation Fix | Fix web_ui.py f-strings, missing JS functions, DOM IDs, and JS syntax | None | DONE |
+| 2 | E2E & Unit Testing | Build test suite to verify HTTP 200, no JS reference errors, and sidebar/excel functionality | None | DONE |
 
 ## Interface Contracts
 - Endpoint: `GET /app` -> returns `HTMLResponse` containing single-page web app dashboard.

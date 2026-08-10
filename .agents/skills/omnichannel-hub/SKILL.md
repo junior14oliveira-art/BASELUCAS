@@ -129,18 +129,33 @@ Aba `/app` → **Integrações** = hub de tiles (estilo BaseLinker). Catálogo: 
 
 ---
 
-## Roadmap curto (quadro oficial)
+## Roadmap — fonte da verdade
 
-| Fase | Entrega | Status |
+**Oficial (produção):** `docs/ROADMAP.md` — **Etapas 1–4** do pipeline assíncrono (fábrica).  
+**Diagrama:** `docs/PIPELINE_ASSINCRONO.md`.  
+**Não confundir** com o quadro histórico “Fases 1–4” abaixo, nem com os sprints de paridade BL em `docs/PIPELINE_PROMPTS_ROADMAP.md` (molde UI only).
+
+### Etapas oficiais (fábrica) — usar este vocabulário
+
+| Etapa | Entrega | Status (ver checklist em `docs/ROADMAP.md`) |
 |---|---|---|
-| **1** | APIs e Infra (FastAPI + Next.js + API ML 4MC) | 🟢 Concluído |
-| **2** | Conexão do feed → SQLite → Guia Pedidos / Lista | 🟡 Em andamento (sync + lista local; vazio se upstream 0) |
-| **3** | Bipagem Pick & Pack (scanner USB) | 🔴 Pendente — **não iniciar** |
-| **4** | Impressão ZPL Direct (Zebra/Elgin) | 🔴 Pendente — skeleton etiquetas em `docs/LABELS_ML.md` (preview local; ML gated) |
+| **1** | Fundação do chão de fábrica (usuários / roles / pickup) | 🟡 Pronto para iniciar |
+| **2** | Macro fiscal (Bling → pedido de venda + NF-e) | 🔴 Não iniciado |
+| **3** | Gatilho da logística (webhook Bling + ZPL engatilhado) | 🔴 Não iniciado |
+| **4** | Convergência física (bipagem Pick & Pack + impressão ZPL) | 🔴 Não iniciado |
+
+### Fases 1–4 (histórico / pré-requisitos) — não é o plano oficial
+
+| Fase antiga | Entrega | Status | Mapeamento |
+|---|---|---|---|
+| **1** | APIs e Infra (FastAPI + molde UI + bridge ML 4MC) | 🟢 Concluído | Pré-requisito — **≠ Etapa 1** |
+| **2** | Feed → SQLite → Guia Pedidos / Lista | 🟡 Em uso (sync + lista; vazio se upstream 0) | Pré-requisito — **≠ Etapa 2 (Bling)** |
+| **3** | Bipagem Pick & Pack (scanner USB) | Absorvida | → **Etapa 4** |
+| **4** | Impressão ZPL Direct (Zebra/Elgin) | Absorvida | → **Etapas 3–4** (destravar + imprimir) |
 
 **UI `/app` (molde BaseLinker):** Guia Pedidos, Guia Produtos, Financeiro detalhado (relatório só de `RealOrderDB` / cache ML — sem Bling/SEFAZ inventado).
 
-Docs: `docs/ROADMAP.md`, `docs/ARCHITECTURE.md`, `docs/DATA_SOURCE_ML_FEED.md`, `docs/MERCADOLIVRE_API_STUDY.md`, `docs/LABELS_ML.md`.
+Docs: `docs/ROADMAP.md` (oficial), `docs/ARCHITECTURE.md`, `docs/DATA_SOURCE_ML_FEED.md`, `docs/MERCADOLIVRE_API_STUDY.md`, `docs/LABELS_ML.md`, `docs/PIPELINE_PROMPTS_ROADMAP.md` (molde BL).
 
 ---
 

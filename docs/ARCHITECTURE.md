@@ -1,19 +1,20 @@
 # Arquitetura: BASE ANTIGRAVITY (jrdev1 / 4M&C)
 
 Plataforma **nativa** estilo BaseLinker para a 4M&C.  
-**BaseLinker = molde de UI/UX.** **Dados de produção = Mercado Livre via API 4MC (read-only) + cache SQLite.**
+**BaseLinker = molde de UI/UX (estudo).** **Não** é fonte de pedidos/status em produção.  
+**Dados de produção = Mercado Livre via API 4MC (read-only) + cache SQLite.**
 
-Documentos irmãos: `docs/DATA_SOURCE_ML_FEED.md` (feed 4MC) · `docs/MERCADOLIVRE_API_STUDY.md` (API oficial ML) · `docs/BASELINKER_API_STUDY.md` (molde UI) · `docs/LABELS_ML.md` (etiquetas) · Roadmap: `docs/ROADMAP.md` · Skill: `.agents/skills/omnichannel-hub/SKILL.md`
+Documentos irmãos: `docs/DATA_SOURCE_ML_FEED.md` (feed 4MC) · `docs/MERCADOLIVRE_API_STUDY.md` (API oficial ML) · `docs/BASELINKER_API_STUDY.md` (molde UI) · `docs/LABELS_ML.md` (etiquetas) · **Roadmap oficial (Etapas 1–4):** `docs/ROADMAP.md` · Paridade molde BL (não produção): `docs/PIPELINE_PROMPTS_ROADMAP.md` · Skill: `.agents/skills/omnichannel-hub/SKILL.md`
 
 ---
 
 ## Visão em uma frase
 
-Construir o **nosso** hub de pedidos/catálogo/expedição (paridade operacional com a experiência BaseLinker), alimentado pelo feed ML da 4MC, sem depender da API BaseLinker como fonte.
+Construir o **nosso** hub de pedidos/catálogo/expedição (experiência inspirada no BaseLinker), alimentado pelo feed ML da 4MC, sem depender da API BaseLinker como OMS de produção.
 
 ---
 
-## Diagrama — fluxo operacional (Sprint 1)
+## Diagrama — fluxo operacional atual (pré-requisito: feed ML → SQLite)
 
 ```mermaid
 flowchart LR
@@ -63,10 +64,15 @@ Front Next.js (`apps/web`) e pasta `KIRO/` carregam o **molde** BaseLinker (UX).
 
 | Peça | Papel |
 |---|---|
-| Layout / status / PickPack / labels (conceito) | Molde inspirado no BaseLinker |
-| `BASELINKER_API_TOKEN` / client BL | Legado / referência — **não** pipeline de produção atual |
+| Layout / status / PickPack / labels (conceito) | **Molde** inspirado no BaseLinker — UX only |
+| `apps/web` / `KIRO/` + client BL | Estudo / paridade visual — **não** OMS de produção |
+| `BASELINKER_API_TOKEN` / `baselinker_client.py` | Legado / sandbox — **nunca** `getOrders` / status para filas operacionais |
 | `ML_FEED_*` + `MLFeedSyncService` | **Fonte real** de pedidos/produtos no cache |
 | `RealOrderDB` / `RealProductDB` / `SyncMetaDB` | Persistência local lida pela UI |
+| Filas nativas + pickup | Produção local (SQLite) — ver skill `omnichannel-hub` |
+
+Roadmap de **produção** = **Etapas 1–4** em `docs/ROADMAP.md` (usuários → Bling/NF → webhook/ZPL → bipagem+impressão).  
+“Fases 1–4” antigas (infra / feed / pickpack / ZPL) = histórico; mapeamento na skill e no `ROADMAP.md`.
 
 ---
 
@@ -76,7 +82,8 @@ Front Next.js (`apps/web`) e pasta `KIRO/` carregam o **molde** BaseLinker (UX).
 - **Cache:** SQLite `omnichannel_real.db` (`DATABASE_URL`)
 - **Integração ML:** bridge 4MC read-only (`ml_feed_client` + `sync_service`)
 - **UI operacional:** Jinja/HTML em `web_ui.py` em `/app`
-- **Planejado (não operacional neste fluxo):** Postgres multi-tenant, Redis locks, RabbitMQ EDA, sync Bling ao vivo, emissão NF-e, impressão ZPL (Sprint 4)
+- **Planejado (Etapas 2–4 do roadmap oficial):** sync Bling ao vivo, emissão NF-e, webhook, ZPL engatilhado, bipagem + impressão térmica
+- **Visão longa (não confundir com Etapas):** Postgres multi-tenant, Redis locks, RabbitMQ EDA
 - **Pré-config (stub seguro):** Bling OAuth + flags NF-e — ver `docs/BLING_API_STUDY.md` (`BLING_READ_ONLY=true`, `NFE_EMIT_ENABLED=false`)
 
 ---

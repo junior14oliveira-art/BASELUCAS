@@ -1,8 +1,28 @@
-# Roadmap para Conclusão do Pipeline 4M&C
+# Roadmap oficial — Pipeline 4 etapas (fábrica 4M&C)
 
-Este é o mapa de batalha para finalizarmos 100% o motor do **Pipeline Assíncrono** (onde a burocracia corre solta enquanto o técnico trabalha sem pausas). 
+> [!IMPORTANT]
+> **Fonte da verdade do roadmap de produção.**  
+> As entregas oficiais são as **Etapas 1–4** abaixo (chão de fábrica + fiscal + logística + convergência física).  
+> Diagrama paralelo: `docs/PIPELINE_ASSINCRONO.md`.  
+> Skill: `.agents/skills/omnichannel-hub/SKILL.md`.
 
-Aqui está a análise de tudo o que falta e a ordem de execução:
+Este é o mapa de batalha para finalizarmos 100% o motor do **Pipeline Assíncrono** (onde a burocracia corre solta enquanto o técnico trabalha sem pausas).
+
+---
+
+## Vocabulário: “Fases” antigas × “Etapas” oficiais
+
+| Nome antigo (histórico) | O que era | Relação com o roadmap oficial |
+|---|---|---|
+| **Fase 1** — APIs e Infra | FastAPI + molde UI + bridge ML 4MC | **Pré-requisito concluído** — não é Etapa 1 |
+| **Fase 2** — Feed → SQLite → Guia Pedidos | Sync ML read-only + cache | **Pré-requisito em uso** — base das Etapas; não confundir com Etapa 2 (Bling) |
+| **Fase 3** — Pick & Pack (scanner) | Bipagem USB | Absorvida pela **Etapa 4** |
+| **Fase 4** — ZPL Direct | Impressão térmica | Absorvida pelas **Etapas 3–4** (destravar ZPL + bipar/imprimir) |
+
+**Regra:** em planos, commits e prompts de produção, use **Etapa N**.  
+“Fase 1–4” só aparece como histórico / mapeamento — nunca como plano paralelo conflitante.
+
+**Fora deste roadmap:** paridade de UI com a API BaseLinker (`docs/PIPELINE_PROMPTS_ROADMAP.md`) é **molde/estudo**, não pipeline de produção. Dados reais = ML 4MC + SQLite.
 
 ---
 
